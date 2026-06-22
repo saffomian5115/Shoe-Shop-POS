@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -23,6 +24,16 @@ function CustomTooltip({ active, payload, label, currency = true }) {
         </p>
       ))}
     </div>
+  )
+}
+
+function PackageIcon({ size, className }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/>
+      <path d="M12 22V12"/>
+      <path d="M3 3l9 5 9-5"/>
+    </svg>
   )
 }
 
@@ -51,18 +62,13 @@ export default function Dashboard({ onNavigate }) {
     return { date_from: today, date_to: today }
   }
 
-  useEffect(() => {
-    loadData()
-  }, [dateFilter])
+  useEffect(() => { loadData() }, [dateFilter])
 
   const loadData = async () => {
     setLoading(true)
     const range = getDateRange(dateFilter)
     try {
-      const [
-        statsData, salesData, topData,
-        trendData, catData, weeklyData
-      ] = await Promise.all([
+      const [statsData, salesData, topData, trendData, catData, weeklyData] = await Promise.all([
         window.api.getDashboardStats(range),
         window.api.getSales({ ...range, limit: 5, status: 'active' }),
         window.api.getTopProducts({ ...range, limit: 5 }),
@@ -94,33 +100,32 @@ export default function Dashboard({ onNavigate }) {
     )
   }
 
+  const sectionVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: (delay) => ({ opacity: 1, y: 0, transition: { delay } })
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
           <p className="text-sm text-gray-500">Welcome back! Here's your business overview.</p>
         </div>
         <div className="flex gap-2">
           {['today', 'week', 'month'].map(f => (
-            <button
-              key={f}
-              onClick={() => setDateFilter(f)}
+            <button key={f} onClick={() => setDateFilter(f)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
-                dateFilter === f
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
-              }`}
-            >
+                dateFilter === f ? 'bg-indigo-600 text-white' :
+                'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}>
               {f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
         </div>
-      </div>
+      </motion.div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <motion.div custom={0.1} variants={sectionVariants} initial="hidden" animate="visible" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-gray-900 rounded-xl p-5 border border-gray-200 dark:border-gray-800">
           <div className="flex items-center justify-between">
             <div>
@@ -161,19 +166,16 @@ export default function Dashboard({ onNavigate }) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Low Stock Items</p>
-              <p className={`text-2xl font-bold mt-1 ${stats.low_stock_count > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
-                {stats.low_stock_count}
-              </p>
+              <p className={`text-2xl font-bold mt-1 ${stats.low_stock_count > 0 ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>{stats.low_stock_count}</p>
             </div>
             <div className={`p-3 rounded-lg ${stats.low_stock_count > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-gray-800'}`}>
               <AlertTriangle className={stats.low_stock_count > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400'} size={24} />
             </div>
           </div>
         </button>
-      </div>
+      </motion.div>
 
-      {/* Quick Actions */}
-      <div className="flex gap-3">
+      <motion.div custom={0.15} variants={sectionVariants} initial="hidden" animate="visible" className="flex gap-3">
         <button onClick={() => onNavigate('pos')}
           className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
           <ShoppingCart size={18} /> New Sale
@@ -182,41 +184,31 @@ export default function Dashboard({ onNavigate }) {
           className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all cursor-pointer">
           <PackageIcon size={18} /> Add Product
         </button>
-      </div>
+      </motion.div>
 
-      {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Bar Chart - Weekly/Monthly Sales */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5">
+        <motion.div custom={0.2} variants={sectionVariants} initial="hidden" animate="visible" className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5">
           <div className="flex items-center gap-2 mb-4">
             <BarChart3 className="text-indigo-500" size={20} />
             <h2 className="font-semibold text-gray-900 dark:text-white">
-              {dateFilter === 'today' ? "Today's" : dateFilter === 'week' ? 'Daily Sales' : 'Daily Sales'} Overview
+              {dateFilter === 'today' ? "Today's" : 'Daily Sales'} Overview
             </h2>
           </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={weeklySales.length > 0 ? weeklySales : salesTrend.slice(-7)} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                <XAxis
-                  dataKey="period"
-                  tick={{ fontSize: 11, fill: '#9ca3af' }}
-                  tickFormatter={(val) => {
-                    if (!val) return ''
-                    const parts = val.split('-')
-                    return parts.length === 3 ? `${parts[2]}/${parts[1]}` : val
-                  }}
-                />
+                <XAxis dataKey="period" tick={{ fontSize: 11, fill: '#9ca3af' }}
+                  tickFormatter={(val) => { if (!val) return ''; const p = val.split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : val }} />
                 <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={(val) => val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val} />
                 <Tooltip content={<CustomTooltip />} />
                 <Bar dataKey="revenue" name="Revenue" fill="#6366f1" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Line Chart - 30-Day Trend */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5">
+        <motion.div custom={0.25} variants={sectionVariants} initial="hidden" animate="visible" className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5">
           <div className="flex items-center gap-2 mb-4">
             <TrendLine className="text-emerald-500" size={20} />
             <h2 className="font-semibold text-gray-900 dark:text-white">30-Day Sales Trend</h2>
@@ -225,16 +217,9 @@ export default function Dashboard({ onNavigate }) {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={salesTrend} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11, fill: '#9ca3af' }}
-                  tickFormatter={(val) => {
-                    if (!val) return ''
-                    const parts = val.split('-')
-                    return parts.length === 3 ? `${parts[2]}/${parts[1]}` : val
-                  }}
-                  interval="preserveStartEnd"
-                />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#9ca3af' }}
+                  tickFormatter={(val) => { if (!val) return ''; const p = val.split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : val }}
+                  interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 11, fill: '#9ca3af' }} tickFormatter={(val) => val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val} />
                 <Tooltip content={<CustomTooltip />} />
                 <Legend />
@@ -243,13 +228,11 @@ export default function Dashboard({ onNavigate }) {
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </motion.div>
       </div>
 
-      {/* Bottom Row - Pie Chart + Tables */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Pie Chart - Category Breakdown */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5">
+        <motion.div custom={0.3} variants={sectionVariants} initial="hidden" animate="visible" className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5">
           <div className="flex items-center gap-2 mb-4">
             <PieChartIcon className="text-rose-500" size={20} />
             <h2 className="font-semibold text-gray-900 dark:text-white">Sales by Category</h2>
@@ -257,36 +240,24 @@ export default function Dashboard({ onNavigate }) {
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie
-                  data={categoryBreakdown.filter(c => c.total > 0)}
-                  dataKey="total"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  innerRadius={45}
-                  paddingAngle={3}
-                >
+                <Pie data={categoryBreakdown.filter(c => c.total > 0)} dataKey="total" nameKey="name"
+                  cx="50%" cy="50%" outerRadius={80} innerRadius={45} paddingAngle={3}>
                   {categoryBreakdown.filter(c => c.total > 0).map((_, i) => (
                     <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip content={<CustomTooltip />} />
-                <Legend
-                  verticalAlign="bottom"
-                  height={36}
-                  formatter={(value) => <span className="text-xs text-gray-600 dark:text-gray-400">{value}</span>}
-                />
+                <Legend verticalAlign="bottom" height={36}
+                  formatter={(value) => <span className="text-xs text-gray-600 dark:text-gray-400">{value}</span>} />
               </PieChart>
             </ResponsiveContainer>
           </div>
           {categoryBreakdown.filter(c => c.total === 0).length > 0 && (
             <p className="text-xs text-gray-400 text-center mt-2">Categories with no sales are hidden</p>
           )}
-        </div>
+        </motion.div>
 
-        {/* Top Selling Products */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
+        <motion.div custom={0.35} variants={sectionVariants} initial="hidden" animate="visible" className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
           <div className="p-4 border-b border-gray-200 dark:border-gray-800">
             <h2 className="font-semibold text-gray-900 dark:text-white">Top Selling Products</h2>
           </div>
@@ -313,10 +284,9 @@ export default function Dashboard({ onNavigate }) {
               </tbody>
             </table>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Recent Transactions */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
+        <motion.div custom={0.4} variants={sectionVariants} initial="hidden" animate="visible" className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
           <div className="p-4 border-b border-gray-200 dark:border-gray-800">
             <h2 className="font-semibold text-gray-900 dark:text-white">Recent Transactions</h2>
           </div>
@@ -333,9 +303,7 @@ export default function Dashboard({ onNavigate }) {
                     sale.payment_type === 'cash' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
                     sale.payment_type === 'card' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
                     'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                  }`}>
-                    {sale.payment_type === 'cash' ? 'Cash' : sale.payment_type === 'card' ? 'Card' : 'Mixed'}
-                  </span>
+                  }`}>{sale.payment_type === 'cash' ? 'Cash' : sale.payment_type === 'card' ? 'Card' : 'Mixed'}</span>
                 </div>
               </div>
             ))}
@@ -343,18 +311,8 @@ export default function Dashboard({ onNavigate }) {
               <p className="text-center text-sm text-gray-400 py-4">No recent transactions</p>
             )}
           </div>
-        </div>
+        </motion.div>
       </div>
     </div>
-  )
-}
-
-function PackageIcon({ size, className }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/>
-      <path d="M12 22V12"/>
-      <path d="M3 3l9 5 9-5"/>
-    </svg>
   )
 }

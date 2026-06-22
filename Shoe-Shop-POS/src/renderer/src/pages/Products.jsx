@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { formatCurrency, generateBarcode } from '../lib/utils'
-import { Plus, Search, Edit2, Image, Grid3X3, List,QrCode } from 'lucide-react'
+import { Plus, Search, Edit2, Image, Grid3X3, List, QrCode, Printer } from 'lucide-react'
+import JsBarcode from 'jsbarcode'
 
 export default function Products() {
   const [products, setProducts] = useState([])
@@ -16,6 +18,7 @@ export default function Products() {
     name: '', category_id: '', brand_id: '', gender: 'Men', size: '', color: '',
     buying_price: '', selling_price: '', stock: '', min_stock_level: 5, barcode: ''
   })
+  const [barcodePreview, setBarcodePreview] = useState(null)
 
   useEffect(() => { loadData() }, [])
 
@@ -45,7 +48,10 @@ export default function Products() {
 
   const openNewForm = () => {
     setEditingProduct(null)
-    setForm({ name: '', category_id: '', brand_id: '', gender: 'Men', size: '', color: '', buying_price: '', selling_price: '', stock: '', min_stock_level: 5, barcode: generateBarcode() })
+    const newBarcode = generateBarcode()
+    setForm({ name: '', category_id: '', brand_id: '', gender: 'Men', size: '', color: '', buying_price: '', selling_price: '', stock: '', min_stock_level: 5, barcode: newBarcode })
+    setBarcodePreview(null)
+    showBarcodePreview(newBarcode)
     setShowForm(true)
   }
 
@@ -57,6 +63,8 @@ export default function Products() {
       buying_price: product.buying_price, selling_price: product.selling_price,
       stock: product.stock, min_stock_level: product.min_stock_level, barcode: product.barcode || ''
     })
+    setBarcodePreview(null)
+    if (product.barcode) showBarcodePreview(product.barcode)
     setShowForm(true)
   }
 
@@ -79,6 +87,33 @@ export default function Products() {
   const toggleActive = async (id) => {
     await window.api.toggleProductActive(id)
     loadData()
+  }
+
+  const showBarcodePreview = (barcode) => {
+    if (!barcode) return
+    try {
+      setTimeout(() => {
+        const svg = document.getElementById('barcode-preview-svg')
+        if (svg) {
+          JsBarcode(svg, barcode, {
+            format: 'CODE128',
+            width: 2,
+            height: 60,
+            displayValue: true,
+            fontSize: 14
+          })
+          setBarcodePreview(barcode)
+        }
+      }, 100)
+    } catch (e) {
+      console.error('Barcode preview error:', e)
+    }
+  }
+
+  const handleGenerateBarcode = async () => {
+    const newBarcode = generateBarcode()
+    setForm({ ...form, barcode: newBarcode })
+    showBarcodePreview(newBarcode)
   }
 
   const filteredProducts = products.filter(p => {
@@ -134,22 +169,28 @@ export default function Products() {
 
       {/* Table View */}
       {viewMode === 'table' && (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 uppercase bg-gray-50 dark:bg-gray-800">
-                <th className="p-3">Name</th>
-                <th className="p-3">Category</th>
-                <th className="p-3">Price</th>
-                <th className="p-3">Stock</th>
-                <th className="p-3">Barcode</th>
-                <th className="p-3">Status</th>
-                <th className="p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredProducts.map(p => (
-                <tr key={p.id} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all">
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">            <table className="w-full">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 uppercase bg-gray-50 dark:bg-gray-800">
+                  <th className="p-3">Name</th>
+                  <th className="p-3">Category</th>
+                  <th className="p-3">Price</th>
+                  <th className="p-3">Stock</th>
+                  <th className="p-3">Barcode</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <AnimatePresence>
+                {filteredProducts.map(p => (
+                  <motion.tr
+                    key={p.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all"
+                  >
                   <td className="p-3">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded flex items-center justify-center text-sm">👟</div>
@@ -165,15 +206,15 @@ export default function Products() {
                   <td className="p-3 text-sm text-gray-500 font-mono">{p.barcode || '-'}</td>
                   <td className="p-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.active ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>{p.active ? 'Active' : 'Inactive'}</span>
-                  </td>
-                  <td className="p-3">
+                  </td>                    <td className="p-3">
                     <div className="flex gap-1">
                       <button onClick={() => openEditForm(p)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-indigo-600 cursor-pointer"><Edit2 size={16} /></button>
                       <button onClick={() => toggleActive(p.id)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-red-600 cursor-pointer">{p.active ? '🟢' : '🔴'}</button>
                     </div>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
+              </AnimatePresence>
             </tbody>
           </table>
           {filteredProducts.length === 0 && <p className="text-center text-sm text-gray-400 py-8">No products found</p>}
@@ -272,7 +313,14 @@ export default function Products() {
                 <div className="flex gap-2">
                   <input type="text" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })}
                     className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono outline-none" />
-                  <button onClick={() => setForm({ ...form, barcode: generateBarcode() })} className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">Generate</button>
+                  <button onClick={handleGenerateBarcode} className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">Generate</button>
+                </div>
+                {/* Barcode Preview */}
+                <div className="mt-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <svg id="barcode-preview-svg" className="w-full" />
+                  {!barcodePreview && form.barcode && (
+                    <p className="text-xs text-gray-400 text-center">Barcode preview will appear here</p>
+                  )}
                 </div>
               </div>
             </div>

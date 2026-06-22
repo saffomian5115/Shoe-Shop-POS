@@ -72,8 +72,14 @@ const api = {
   backupLocal: () => ipcRenderer.invoke('backup:local'),
   getLastBackupTime: () => ipcRenderer.invoke('backup:get-last-time'),
 
-  // Print (placeholder for thermal printer)
-  printReceipt: (data) => ipcRenderer.invoke('print:receipt', data)
+  // Printer
+  listPrinters: () => ipcRenderer.invoke('printer:list'),
+  testPrinter: (printerName) => ipcRenderer.invoke('printer:test', printerName),
+  printReceipt: (data) => ipcRenderer.invoke('print:receipt', data),
+  printBarcodeLabel: (data) => ipcRenderer.invoke('print:barcode-label', data),
+
+  // Barcode
+  generateBarcode: (text) => ipcRenderer.invoke('barcode:generate', text)
 }
 
 if (process.contextIsolated) {

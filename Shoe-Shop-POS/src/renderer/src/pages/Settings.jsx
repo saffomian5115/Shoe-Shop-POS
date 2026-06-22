@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useUiStore } from '../store/uiStore'
-import { Save, Users, Printer, Database, Download, Upload, Sun, Moon, Building2 } from 'lucide-react'
+import { Save, Users, Printer, Database, Download, Upload, Sun, Moon, Building2, TestTube } from 'lucide-react'
 
 export default function Settings() {
   const { theme, toggleTheme } = useUiStore()
@@ -15,25 +15,29 @@ export default function Settings() {
   const [brands, setBrands] = useState([])
   const [newCategory, setNewCategory] = useState('')
   const [newBrand, setNewBrand] = useState('')
+  const [printerName, setPrinterName] = useState('')
+  const [printerStatus, setPrinterStatus] = useState('')
 
   useEffect(() => {
-    loadData()
+    loadSettings()
   }, [])
 
-  const loadData = async () => {
+  const loadSettings = async () => {
     try {
-      const [shop, usrs, cats, brds, lastBk] = await Promise.all([
+      const [shop, usrs, cats, brds, lastBk, savedPrinterName] = await Promise.all([
         window.api.getShopInfo(),
         window.api.getUsers(),
         window.api.getCategories(),
         window.api.getBrands(),
-        window.api.getLastBackupTime()
+        window.api.getLastBackupTime(),
+        window.api.getSetting('printer_name')
       ])
       setShopInfo(shop || {})
       setUsers(usrs)
       setCategories(cats)
       setBrands(brds)
       setLastBackup(lastBk)
+      if (savedPrinterName) setPrinterName(savedPrinterName)
     } catch (e) { console.error(e) }
   }
 
@@ -48,14 +52,14 @@ export default function Settings() {
     if (result.success) {
       setShowUserForm(false)
       setUserForm({ username: '', password: '', role: 'cashier' })
-      loadData()
+      loadSettings()
     }
   }
 
   const deleteUser = async (id) => {
     if (confirm('Delete this user?')) {
       await window.api.deleteUser(id)
-      loadData()
+      loadSettings()
     }
   }
 
@@ -77,19 +81,39 @@ export default function Settings() {
     if (!newCategory.trim()) return
     await window.api.createCategory({ name: newCategory })
     setNewCategory('')
-    loadData()
+    loadSettings()
   }
 
   const addBrand = async () => {
     if (!newBrand.trim()) return
     await window.api.createBrand({ name: newBrand })
     setNewBrand('')
-    loadData()
+    loadSettings()
+  }
+
+  const handleTestPrint = async () => {
+    if (!printerName) {
+      setPrinterStatus('❌ Please enter a printer name first')
+      return
+    }
+    setPrinterStatus('⏳ Testing printer...')
+    try {
+      const result = await window.api.testPrinter(printerName)
+      if (result.success) {
+        setPrinterStatus('✅ Test print sent successfully! Check your printer.')
+      } else {
+        setPrinterStatus(`❌ ${result.error}`)
+      }
+    } catch (e) {
+      setPrinterStatus(`❌ ${e.message}`)
+    }
+    setTimeout(() => setPrinterStatus(''), 5000)
   }
 
   const tabs = [
     { id: 'shop', label: 'Shop Info', icon: Building2 },
     { id: 'users', label: 'Users', icon: Users },
+    { id: 'printer', label: 'Printer', icon: Printer },
     { id: 'backup', label: 'Backup', icon: Database },
     { id: 'theme', label: 'Theme', icon: theme === 'light' ? Sun : Moon }
   ]
@@ -251,6 +275,42 @@ export default function Settings() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Printer Setup */}
+      {activeTab === 'printer' && (
+        <div className="max-w-xl space-y-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-4">
+            <div>
+              <h3 className="font-semibold text-gray-900 dark:text-white">Thermal Printer Setup</h3>
+              <p className="text-sm text-gray-500 mt-1">Configure your 80mm thermal receipt printer</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Printer Name</label>
+              <p className="text-xs text-gray-500 mb-2">Enter the printer name as shown in Windows Settings &gt; Printers &amp; Scanners</p>
+              <input type="text" value={printerName} onChange={(e) => { setPrinterName(e.target.value); window.api.setSetting({ key: 'printer_name', value: e.target.value }) }}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                placeholder="e.g. EPSON TM-T20" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleTestPrint} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
+                <TestTube size={18} /> Test Print
+              </button>
+            </div>
+            {printerStatus && (
+              <p className={`text-sm ${printerStatus.includes('✅') ? 'text-green-600' : printerStatus.includes('❌') ? 'text-red-600' : 'text-gray-600'}`}>
+                {printerStatus}
+              </p>
+            )}
+          </div>
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+            <p className="text-sm text-blue-700 dark:text-blue-400">
+              💡 Make sure your thermal printer is installed as a Windows printer driver. 
+              The printer name must match exactly what appears in Windows Settings → Printers &amp; Scanners.
+              Receipts will be formatted for 80mm thermal paper.
+            </p>
+          </div>
         </div>
       )}
 

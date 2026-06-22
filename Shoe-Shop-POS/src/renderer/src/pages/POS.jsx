@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useCartStore } from '../store/cartStore'
 import { useAuthStore } from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import {
-  Search, Plus, Minus, Trash2, Printer, 
-  DollarSign, CreditCard, Save, X, Receipt, ShoppingCart,
-  Package
+  Search, Plus, Minus, Trash2, Printer,
+  DollarSign, CreditCard, Save, X, ShoppingCart
 } from 'lucide-react'
 
 export default function POS() {
@@ -19,6 +19,8 @@ export default function POS() {
   const [heldBills, setHeldBills] = useState([])
   const [showHeldBills, setShowHeldBills] = useState(false)
   const [barcodeBuffer, setBarcodeBuffer] = useState('')
+  const [printing, setPrinting] = useState(false)
+  const [printStatus, setPrintStatus] = useState('')
   const searchRef = useRef(null)
   const barcodeTimer = useRef(null)
   const { subtotal, discountAmount, total } = cart.getTotals()
@@ -149,6 +151,33 @@ export default function POS() {
     } catch (e) { console.error(e) }
   }
 
+  const handlePrintReceipt = async () => {
+    if (!lastSale) return
+    setPrinting(true)
+    setPrintStatus('')
+    try {
+      const printerName = await window.api.getSetting('printer_name')
+      if (!printerName) {
+        setPrintStatus('❌ No printer configured. Go to Settings → Printer to set up.')
+        setPrinting(false)
+        return
+      }
+      const result = await window.api.printReceipt({
+        saleId: lastSale.id,
+        printerName
+      })
+      if (result.success) {
+        setPrintStatus('✅ Receipt sent to printer!')
+      } else {
+        setPrintStatus(`❌ ${result.error}`)
+      }
+    } catch (e) {
+      setPrintStatus(`❌ ${e.message}`)
+    }
+    setPrinting(false)
+    setTimeout(() => setPrintStatus(''), 5000)
+  }
+
   const handleReturnHeldBill = async (bill) => {
     try {
       const fullBill = await window.api.getSale(bill.id)
@@ -186,10 +215,13 @@ export default function POS() {
             {searchQuery && searchResults.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-50 max-h-80 overflow-y-auto">
                 {searchResults.map(product => (
-                  <button
+                  <motion.button
                     key={product.id}
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
                     onClick={() => { cart.addItem(product); setSearchQuery(''); setSearchResults([]) }}
                     className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all text-left"
+                    whileHover={{ scale: 1.01 }}
                   >
                     <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg">
                       👟
@@ -200,7 +232,7 @@ export default function POS() {
                     </div>
                     <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(product.selling_price)}</p>
                     <p className="text-xs text-gray-400">Stock: {product.stock}</p>
-                  </button>
+                  </motion.button>
                 ))}
               </div>
             )}
@@ -216,8 +248,15 @@ export default function POS() {
               <p className="text-sm">Search products or scan barcode to add items</p>
             </div>
           ) : (
-            cart.items.map((item, i) => (
-              <div key={i} className="flex items-center gap-3 p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
+            <AnimatePresence>
+            {cart.items.map((item, i) => (
+              <motion.div
+                key={item.product_id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="flex items-center gap-3 p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"
+              >
                 <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg flex-shrink-0">
                   👟
                 </div>
@@ -238,8 +277,9 @@ export default function POS() {
                 <button onClick={() => cart.removeItem(item.product_id)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-red-400 hover:text-red-600 cursor-pointer">
                   <Trash2 size={16} />
                 </button>
-              </div>
-            ))
+              </motion.div>
+            ))}
+            </AnimatePresence>
           )}
         </div>
       </div>
@@ -357,21 +397,66 @@ export default function POS() {
 
       {/* Receipt Modal */}
       {showReceipt && lastSale && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center"
+          onClick={() => setShowReceipt(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="text-center mb-4">
-              <div className="text-3xl mb-2">✅</div>
+              <div className="text-4xl mb-2 animate-bounce">✅</div>
               <h3 className="text-lg font-bold text-green-600">Payment Successful!</h3>
               <p className="text-xs text-gray-500 mt-1">{lastSale.bill_no}</p>
             </div>
-            <div className="text-center text-xs text-gray-400 mb-4">
-              <p>Receipt printing coming soon</p>
+
+            {/* Receipt Preview */}
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 mb-4 text-xs font-mono leading-relaxed">
+              <div className="text-center font-bold text-sm mb-2">RECEIPT</div>
+              <div className="text-center text-gray-500 mb-2">---</div>
+              <div className="flex justify-between">
+                <span>Bill:</span>
+                <span>{lastSale.bill_no}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Date:</span>
+                <span>{new Date().toLocaleDateString()}</span>
+              </div>
+              <div className="border-t border-gray-300 dark:border-gray-600 my-2"></div>
+              {lastSale.items?.map((item, i) => (
+                <div key={i} className="flex justify-between">
+                  <span className="truncate max-w-[180px]">{item.product_name} x{item.quantity}</span>
+                  <span>{formatCurrency(item.subtotal)}</span>
+                </div>
+              ))}
+              <div className="border-t border-gray-300 dark:border-gray-600 my-2"></div>
+              <div className="flex justify-between font-bold">
+                <span>Total</span>
+                <span>{formatCurrency(lastSale.total)}</span>
+              </div>
             </div>
-            <button onClick={handleNewSale} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold transition-all cursor-pointer">
-              New Sale (F1)
-            </button>
-          </div>
-        </div>
+
+            <div className="flex gap-2">
+              <button onClick={handlePrintReceipt} disabled={printing}
+                className="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-xl font-semibold transition-all cursor-pointer">
+                <Printer size={18} /> {printing ? 'Printing...' : 'Print Receipt'}
+              </button>
+              <button onClick={handleNewSale}
+                className="flex-1 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer">
+                New Sale (F1)
+              </button>
+            </div>
+            {printStatus && (
+              <p className={`text-xs text-center mt-2 ${printStatus.includes('✅') ? 'text-green-600' : 'text-red-600'}`}>{printStatus}</p>
+            )}
+          </motion.div>
+        </motion.div>
       )}
 
       {/* Held Bills Modal */}

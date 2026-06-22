@@ -491,10 +491,72 @@ export function registerIpcHandlers() {
     return setting ? setting.value : null
   })
 
-  // ==================== PRINT (placeholder for thermal printer) ====================
-  ipcMain.handle('print:receipt', (_, data) => {
-    // Placeholder - thermal printer integration will be added later
-    console.log('Print receipt called:', data)
-    return { success: true, message: 'Print functionality coming soon' }
+  // ==================== PRINTER ====================
+  ipcMain.handle('printer:list', async () => {
+    return []
+  })
+
+  ipcMain.handle('printer:test', async (_, printerName) => {
+    const { getPrinter } = await import('./printer')
+    try {
+      const p = getPrinter(printerName)
+      if (!p) return { success: false, error: 'Printer not configured' }
+      const isConnected = await p.isPrinterConnected()
+      if (!isConnected) return { success: false, error: 'Printer not connected' }
+      p.clear()
+      p.println('ShoeShop POS Test Print')
+      p.println('================')
+      p.println('If you can read this,')
+      p.println('your printer is working!')
+      p.newLine()
+      p.println(new Date().toLocaleString())
+      p.cut()
+      await p.execute()
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  // ==================== PRINT ====================
+  ipcMain.handle('print:receipt', async (_, { saleId, printerName }) => {
+    try {
+      const db = getDb()
+      const sale = db.prepare(`SELECT s.*, u.username FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE s.id = ?`).get(saleId)
+      if (!sale) return { success: false, error: 'Sale not found' }
+
+      const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(saleId)
+      const shopInfo = db.prepare('SELECT * FROM shop_info WHERE id = 1').get()
+
+      const { generateReceiptContent, printReceipt } = await import('./printer')
+      const receiptText = generateReceiptContent({ shopInfo, sale, items })
+
+      return printReceipt(receiptText, printerName)
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('print:barcode-label', async (_, { barcode, productName, price, printerName }) => {
+    const { printBarcodeLabel } = await import('./printer')
+    return printBarcodeLabel(barcode, productName, price, printerName)
+  })
+
+  // ==================== BARCODE GENERATION ====================
+  ipcMain.handle('barcode:generate', async (_, text) => {
+    try {
+      const bwipjs = await import('bwip-js')
+      const buffer = await bwipjs.toBuffer({
+        bcid: 'code128',
+        text: text,
+        scale: 3,
+        height: 10,
+        includetext: true,
+        textxalign: 'center'
+      })
+      return { success: true, data: buffer.toString('base64') }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
   })
 }
