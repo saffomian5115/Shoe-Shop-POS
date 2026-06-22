@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { app } from 'electron'
+import { execSync } from 'child_process'
 import { getDb } from './database'
 
 const MASTER_PASSWORD_HASH = '8fe8c61a3d8e614a1f36fbc5334e939ad80a565d12dc208ffd89597a180f69de'
@@ -48,21 +49,24 @@ export function registerIpcHandlers() {
   })
 
   ipcMain.handle('users:update', (_, { id, username, password, role, active }) => {
-    const db = getDb()
-    // Prevent changing the admin user's role or deactivating them
-    const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(id)
-    if (targetUser && targetUser.username === 'admin') {
-      // Force admin role, cannot be deactivated
-      role = 'admin'
-      active = true
+    try {
+      const db = getDb()
+      // Prevent changing the admin user's role or deactivating them — check by ROLE not username
+      const targetUser = db.prepare('SELECT username, role FROM users WHERE id = ?').get(id)
+      if (targetUser && targetUser.role === 'admin') {
+        role = 'admin'
+        active = true
+      }
+      if (password) {
+        const hash = hashPassword(password)
+        db.prepare('UPDATE users SET username = ?, password_hash = ?, role = ?, active = ? WHERE id = ?').run(username, hash, role, active ? 1 : 0, id)
+      } else {
+        db.prepare('UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?').run(username, role, active ? 1 : 0, id)
+      }
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
     }
-    if (password) {
-      const hash = hashPassword(password)
-      db.prepare('UPDATE users SET username = ?, password_hash = ?, role = ?, active = ? WHERE id = ?').run(username, hash, role, active ? 1 : 0, id)
-    } else {
-      db.prepare('UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?').run(username, role, active ? 1 : 0, id)
-    }
-    return { success: true }
   })
 
   ipcMain.handle('users:reset-admin', () => {
@@ -79,10 +83,10 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('users:delete', (_, id) => {
     const db = getDb()
-    // Prevent deactivating the admin user
-    const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(id)
-    if (targetUser && targetUser.username === 'admin') {
-      return { success: false, error: 'Cannot deactivate the admin user' }
+    // Prevent deactivating any admin user — check by ROLE not username
+    const targetUser = db.prepare('SELECT username, role FROM users WHERE id = ?').get(id)
+    if (targetUser && targetUser.role === 'admin') {
+      return { success: false, error: 'Cannot deactivate an admin user' }
     }
     // Soft-delete: set active=0 instead of hard-deleting (avoids FK constraint failures with sales/stock_adjustments)
     db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(id)
@@ -137,33 +141,37 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('products:create-with-variants', (_, { parent, variants }) => {
     const db = getDb()
-    const transaction = db.transaction(() => {
-      // Insert parent product (no size/color, stock = 0)
-      const parentResult = db.prepare(`INSERT INTO products
-        (name, category_id, brand_id, gender, buying_price, selling_price, stock, min_stock_level, barcode, parent_sku, active)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`).run(
-        parent.name, parent.category_id || null, parent.brand_id || null,
-        parent.gender || null, parent.buying_price || 0, parent.selling_price || 0,
-        parent.min_stock_level || 5, parent.barcode, parent.parent_sku
-      )
-
-      // Insert each variant
-      const insertVariant = db.prepare(`INSERT INTO products
-        (name, category_id, brand_id, gender, size, color, buying_price, selling_price, stock, min_stock_level, barcode, parent_sku, active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`)
-
-      for (const v of variants) {
-        insertVariant.run(
+    try {
+      const transaction = db.transaction(() => {
+        // Insert parent product (no size/color, stock = 0)
+        const parentResult = db.prepare(`INSERT INTO products
+          (name, category_id, brand_id, gender, buying_price, selling_price, stock, min_stock_level, barcode, parent_sku, active)
+          VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`).run(
           parent.name, parent.category_id || null, parent.brand_id || null,
-          parent.gender || null, v.size, v.color,
-          parent.buying_price || 0, parent.selling_price || 0,
-          parent.min_stock_level || 5, v.barcode, parent.parent_sku
+          parent.gender || null, parent.buying_price || 0, parent.selling_price || 0,
+          parent.min_stock_level || 5, parent.barcode, parent.parent_sku
         )
-      }
 
-      return { success: true, parentId: parentResult.lastInsertRowid, variantCount: variants.length }
-    })
-    return transaction()
+        // Insert each variant
+        const insertVariant = db.prepare(`INSERT INTO products
+          (name, category_id, brand_id, gender, size, color, buying_price, selling_price, stock, min_stock_level, barcode, parent_sku, active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`)
+
+        for (const v of variants) {
+          insertVariant.run(
+            parent.name, parent.category_id || null, parent.brand_id || null,
+            parent.gender || null, v.size, v.color,
+            parent.buying_price || 0, parent.selling_price || 0,
+            parent.min_stock_level || 5, v.barcode, parent.parent_sku
+          )
+        }
+
+        return { success: true, parentId: parentResult.lastInsertRowid, variantCount: variants.length }
+      })
+      return transaction()
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
   })
 
   // ==================== PRODUCTS ====================
@@ -333,14 +341,17 @@ export function registerIpcHandlers() {
       }
       const billNo = `${prefix}${String(seq).padStart(4, '0')}`
 
+      // Round all monetary values to 2 decimal places
+      const round2 = (v) => Math.round((v || 0) * 100) / 100
+
       const result = db.prepare(`INSERT INTO sales (bill_no, customer_name, customer_phone, customer_ntn, 
         total_amount, discount_type, discount_value, discount_amount, net_amount, 
         payment_type, cash_amount, card_amount, status, user_id) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`).run(
         billNo, sale.customer_name || null, sale.customer_phone || null, sale.customer_ntn || null,
-        sale.total_amount || 0, sale.discount_type || 'none', sale.discount_value || 0,
-        sale.discount_amount || 0, sale.net_amount || 0, sale.payment_type || 'cash',
-        sale.cash_amount || 0, sale.card_amount || 0, sale.user_id || null
+        round2(sale.total_amount), sale.discount_type || 'none', round2(sale.discount_value),
+        round2(sale.discount_amount), round2(sale.net_amount), sale.payment_type || 'cash',
+        round2(sale.cash_amount), round2(sale.card_amount), sale.user_id || null
       )
 
       const saleId = result.lastInsertRowid
@@ -624,6 +635,9 @@ export function registerIpcHandlers() {
     const backupDir = path.join(app.getPath('documents'), 'ShoeShopPOS_Backups')
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
 
+    // Force WAL checkpoint so .db-wal is merged into .db before copying
+    getDb().pragma('wal_checkpoint(FULL)')
+
     const date = new Date().toISOString().replace(/[:.]/g, '-')
     const backupPath = path.join(backupDir, `pos_backup_${date}.db`)
     fs.copyFileSync(dbPath, backupPath)
@@ -638,7 +652,24 @@ export function registerIpcHandlers() {
 
   // ==================== PRINTER ====================
   ipcMain.handle('printer:list', async () => {
-    return []
+    try {
+      // Use PowerShell to list Windows printers
+      const output = execSync(
+        'powershell -Command "Get-CimInstance Win32_Printer | Select-Object Name, DriverName, PrinterStatus | ConvertTo-Json"',
+        { encoding: 'utf8', timeout: 5000 }
+      ).trim()
+      if (!output) return []
+      const parsed = JSON.parse(output)
+      const printers = Array.isArray(parsed) ? parsed : [parsed]
+      return printers.map(p => ({
+        name: p.Name,
+        driver: p.DriverName,
+        status: p.PrinterStatus === 3 ? 'ready' : p.PrinterStatus === 4 ? 'offline' : p.PrinterStatus === 5 ? 'error' : 'unknown'
+      }))
+    } catch (e) {
+      console.error('Failed to list printers:', e.message)
+      return []
+    }
   })
 
   ipcMain.handle('printer:test', async (_, printerName) => {
@@ -682,12 +713,132 @@ export function registerIpcHandlers() {
     }
   })
 
-  ipcMain.handle('print:barcode-label', async (_, { barcode, productName, price, printerName }) => {
+  ipcMain.handle('print:barcode-label', async (_, { barcode, productName, price, printerName, copies = 1 }) => {
     const { printBarcodeLabel } = await import('./printer')
-    return printBarcodeLabel(barcode, productName, price, printerName)
+    return printBarcodeLabel(barcode, productName, price, printerName, copies)
+  })
+
+  // ==================== REFUND / RETURN ====================
+  ipcMain.handle('sales:get-by-bill-no', (_, { billNo }) => {
+    const db = getDb()
+    const sale = db.prepare(`SELECT s.*, u.username FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE s.bill_no = ? AND s.status = 'active'`).get(billNo.trim())
+    if (!sale) return null
+    sale.items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(sale.id)
+    return sale
+  })
+
+  ipcMain.handle('sales:refund', (_, { saleId, items, user_id, reason }) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(saleId)
+      if (!sale) return { success: false, error: 'Sale not found' }
+      if (sale.status !== 'active') return { success: false, error: 'Only active sales can be refunded' }
+
+      // Verify all items belong to this sale and have valid quantities
+      for (const refundItem of items) {
+        const saleItem = db.prepare('SELECT * FROM sale_items WHERE id = ? AND sale_id = ?').get(refundItem.id, saleId)
+        if (!saleItem) return { success: false, error: `Item ID ${refundItem.id} not found in this sale` }
+        if (refundItem.quantity > saleItem.quantity) {
+          return { success: false, error: `Cannot refund more than sold quantity for ${saleItem.product_name}` }
+        }
+      }
+
+      // Create a refund record (status='active' so CHECK constraint passes; identified by RFND- prefix)
+      const refundTotal = items.reduce((sum, item) => sum + (item.subtotal || 0), 0)
+      const date = new Date()
+      const prefix = `RFND-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}-`
+      const lastRefund = db.prepare("SELECT bill_no FROM sales WHERE bill_no LIKE ? ORDER BY id DESC LIMIT 1").get(`${prefix}%`)
+      let seq = 1
+      if (lastRefund) {
+        seq = parseInt(lastRefund.bill_no.split('-')[2]) + 1
+      }
+      const refundBillNo = `${prefix}${String(seq).padStart(4, '0')}`
+
+      const round2 = (v) => Math.round((v || 0) * 100) / 100
+
+      const result = db.prepare(`INSERT INTO sales (bill_no, customer_name, customer_phone, customer_ntn,
+        total_amount, discount_type, discount_value, discount_amount, net_amount,
+        payment_type, cash_amount, card_amount, status, user_id)
+        VALUES (?, ?, ?, ?, ?, 'none', 0, 0, ?, ?, 0, 0, 'active', ?)`).run(
+        refundBillNo, sale.customer_name, sale.customer_phone, sale.customer_ntn,
+        round2(refundTotal), round2(refundTotal), sale.payment_type || 'cash',
+        sale.user_id
+      )
+
+      const refundId = result.lastInsertRowid
+      const insertRefundItem = db.prepare('INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, discount, subtotal) VALUES (?, ?, ?, ?, ?, 0, ?)')
+
+      for (const refundItem of items) {
+        const saleItem = db.prepare('SELECT * FROM sale_items WHERE id = ?').get(refundItem.id)
+        insertRefundItem.run(
+          refundId, saleItem.product_id, saleItem.product_name,
+          -Math.abs(refundItem.quantity), saleItem.unit_price,
+          -(saleItem.unit_price * Math.abs(refundItem.quantity))
+        )
+        // Restore stock
+        db.prepare('UPDATE products SET stock = stock + ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(Math.abs(refundItem.quantity), saleItem.product_id)
+      }
+
+      // Log a stock adjustment for the refund
+      for (const refundItem of items) {
+        const saleItem = db.prepare('SELECT * FROM sale_items WHERE id = ?').get(refundItem.id)
+        const currentStock = db.prepare('SELECT stock FROM products WHERE id = ?').get(saleItem.product_id).stock
+        db.prepare('INSERT INTO stock_adjustments (product_id, quantity_change, old_qty, new_qty, reason_type, reason, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          saleItem.product_id, Math.abs(refundItem.quantity),
+          currentStock - Math.abs(refundItem.quantity),
+          currentStock,
+          'Restock', `Refund from bill ${sale.bill_no}: ${reason || 'Customer return'}`, user_id
+        )
+      }
+
+      return { success: true, refund_bill_no: refundBillNo, id: refundId, refund_total: refundTotal }
+    })
+    return transaction()
   })
 
   // ==================== EXCEL IMPORT/EXPORT ====================
+  ipcMain.handle('reports:export-sales', async (_, { date_from, date_to }) => {
+    try {
+      const db = getDb()
+      const sales = db.prepare(`SELECT s.bill_no, s.created_at, s.customer_name, s.customer_phone,
+        s.total_amount, s.discount_type, s.discount_value, s.discount_amount, s.net_amount,
+        s.payment_type, s.status, u.username
+        FROM sales s LEFT JOIN users u ON s.user_id = u.id
+        WHERE s.created_at >= ? AND s.created_at <= ?
+        ORDER BY s.id DESC`).all(date_from, date_to + ' 23:59:59')
+
+      const result = await dialog.showSaveDialog({
+        title: 'Export Sales Report',
+        defaultPath: `sales_report_${date_from}_to_${date_to}.xlsx`,
+        filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
+      })
+      if (result.canceled) return { success: false, error: 'Export cancelled' }
+
+      const XLSX = await import('xlsx')
+      const data = sales.map(s => ({
+        'Bill No': s.bill_no,
+        'Date': s.created_at,
+        'Customer': s.customer_name || '',
+        'Phone': s.customer_phone || '',
+        'Total': s.total_amount,
+        'Discount': s.discount_amount,
+        'Net Amount': s.net_amount,
+        'Payment': s.payment_type,
+        'Status': s.status,
+        'Cashier': s.username || ''
+      }))
+
+      const workbook = XLSX.utils.book_new()
+      const sheet = XLSX.utils.json_to_sheet(data)
+      XLSX.utils.book_append_sheet(workbook, sheet, 'Sales')
+      XLSX.writeFile(workbook, result.filePath)
+
+      return { success: true, path: result.filePath, count: sales.length }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
   ipcMain.handle('excel:export-products', async () => {
     try {
       const db = getDb()

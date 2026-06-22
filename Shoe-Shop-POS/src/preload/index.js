@@ -38,6 +38,8 @@ const api = {
   getSales: (filters) => ipcRenderer.invoke('sales:list', filters),
   getSale: (id) => ipcRenderer.invoke('sales:get', id),
   voidSale: (data) => ipcRenderer.invoke('sales:void', data),
+  refundSale: (data) => ipcRenderer.invoke('sales:refund', data),
+  getSaleByBillNo: (billNo) => ipcRenderer.invoke('sales:get-by-bill-no', billNo),
   holdSale: (data) => ipcRenderer.invoke('sales:hold', data),
   getHeldBills: () => ipcRenderer.invoke('sales:held'),
   deleteHeldBill: (id) => ipcRenderer.invoke('sales:delete-held', id),
@@ -72,6 +74,7 @@ const api = {
   // Reports
   getSalesReport: (filters) => ipcRenderer.invoke('reports:sales', filters),
   getProfitReport: (filters) => ipcRenderer.invoke('reports:profit', filters),
+  exportSalesReport: (filters) => ipcRenderer.invoke('reports:export-sales', filters),
 
   // Backup
   backupLocal: () => ipcRenderer.invoke('backup:local'),

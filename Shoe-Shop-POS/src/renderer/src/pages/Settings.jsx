@@ -22,6 +22,13 @@ export default function Settings() {
   const [supplierForm, setSupplierForm] = useState({ name: '', phone: '', address: '' })
   const [printerName, setPrinterName] = useState('')
   const [printerStatus, setPrinterStatus] = useState('')
+  const [printers, setPrinters] = useState([])
+  const [loadingPrinters, setLoadingPrinters] = useState(false)
+  const [savingShop, setSavingShop] = useState(false)
+  const [savingUser, setSavingUser] = useState(false)
+  const [savingSupplier, setSavingSupplier] = useState(false)
+  const [shopError, setShopError] = useState('')
+  const [userError, setUserError] = useState('')
 
   useEffect(() => {
     loadSettings()
@@ -29,14 +36,15 @@ export default function Settings() {
 
   const loadSettings = async () => {
     try {
-      const [shop, usrs, cats, brds, supps, lastBk, savedPrinterName] = await Promise.all([
+      const [shop, usrs, cats, brds, supps, lastBk, savedPrinterName, printerList] = await Promise.all([
         window.api.getShopInfo(),
         window.api.getUsers(),
         window.api.getCategories(),
         window.api.getBrands(),
         window.api.getSuppliers(),
         window.api.getLastBackupTime(),
-        window.api.getSetting('printer_name')
+        window.api.getSetting('printer_name'),
+        window.api.listPrinters()
       ])
       setShopInfo(shop || {})
       setUsers(usrs)
@@ -44,23 +52,51 @@ export default function Settings() {
       setBrands(brds)
       setSuppliers(supps)
       setLastBackup(lastBk)
+      setPrinters(printerList)
       if (savedPrinterName) setPrinterName(savedPrinterName)
     } catch (e) { console.error(e) }
   }
 
+  const refreshPrinters = async () => {
+    setLoadingPrinters(true)
+    try {
+      const list = await window.api.listPrinters()
+      setPrinters(list)
+      setPrinterStatus(`🔍 Found ${list.length} printer(s)`)
+      setTimeout(() => { if (!printerStatus.includes('❌')) setPrinterStatus('') }, 3000)
+    } catch (e) {
+      setPrinterStatus(`❌ ${e.message}`)
+    }
+    setLoadingPrinters(false)
+  }
+
   const saveShopInfo = async () => {
-    await window.api.updateShopInfo(shopInfo)
-    setBackupStatus('Shop info saved!')
-    setTimeout(() => setBackupStatus(''), 2000)
+    if (savingShop) return
+    setSavingShop(true)
+    setShopError('')
+    try {
+      await window.api.updateShopInfo(shopInfo)
+      setBackupStatus('Shop info saved!')
+      setTimeout(() => setBackupStatus(''), 2000)
+    } catch (e) {
+      setShopError(e.message)
+    }
+    setSavingShop(false)
   }
 
   const createUser = async () => {
+    if (savingUser) return
+    setSavingUser(true)
+    setUserError('')
     const result = await window.api.createUser(userForm)
     if (result.success) {
       setShowUserForm(false)
       setUserForm({ username: '', password: '', role: 'cashier' })
       loadSettings()
+    } else {
+      setUserError(result.error || 'Failed to create user')
     }
+    setSavingUser(false)
   }
 
   const deleteUser = async (id) => {
@@ -76,13 +112,19 @@ export default function Settings() {
   }
 
   const saveEditUser = async () => {
+    if (savingUser) return
+    setSavingUser(true)
+    setUserError('')
     const data = { id: editUserForm.id, username: editUserForm.username, role: editUserForm.role, active: editUserForm.active }
     if (editUserForm.password) data.password = editUserForm.password
     const result = await window.api.updateUser(data)
     if (result.success) {
       setShowEditUser(null)
       loadSettings()
+    } else {
+      setUserError(result.error || 'Failed to update user')
     }
+    setSavingUser(false)
   }
 
   const handleBackup = async () => {
@@ -101,29 +143,52 @@ export default function Settings() {
 
   const addCategory = async () => {
     if (!newCategory.trim()) return
-    await window.api.createCategory({ name: newCategory })
-    setNewCategory('')
-    loadSettings()
+    const result = await window.api.createCategory({ name: newCategory })
+    if (result.success) {
+      setNewCategory('')
+      loadSettings()
+    } else {
+      setBackupStatus(`❌ ${result.error}`)
+      setTimeout(() => setBackupStatus(''), 3000)
+    }
   }
 
   const addBrand = async () => {
     if (!newBrand.trim()) return
-    await window.api.createBrand({ name: newBrand })
-    setNewBrand('')
-    loadSettings()
+    const result = await window.api.createBrand({ name: newBrand })
+    if (result.success) {
+      setNewBrand('')
+      loadSettings()
+    } else {
+      setBackupStatus(`❌ ${result.error}`)
+      setTimeout(() => setBackupStatus(''), 3000)
+    }
   }
 
   const handleAddSupplier = async () => {
-    if (!supplierForm.name.trim()) return
-    await window.api.createSupplier({
-      name: supplierForm.name.trim(),
-      phone: supplierForm.phone.trim(),
-      address: supplierForm.address.trim()
-    })
-    setShowAddSupplier(false)
-    setSupplierForm({ name: '', phone: '', address: '' })
-    const supps = await window.api.getSuppliers()
-    setSuppliers(supps)
+    if (!supplierForm.name.trim() || savingSupplier) return
+    setSavingSupplier(true)
+    setBackupStatus('')
+    try {
+      const result = await window.api.createSupplier({
+        name: supplierForm.name.trim(),
+        phone: supplierForm.phone.trim(),
+        address: supplierForm.address.trim()
+      })
+      if (result.success) {
+        setShowAddSupplier(false)
+        setSupplierForm({ name: '', phone: '', address: '' })
+        const supps = await window.api.getSuppliers()
+        setSuppliers(supps)
+      } else {
+        setBackupStatus(`❌ ${result.error}`)
+        setTimeout(() => setBackupStatus(''), 3000)
+      }
+    } catch (e) {
+      setBackupStatus(`❌ ${e.message}`)
+      setTimeout(() => setBackupStatus(''), 3000)
+    }
+    setSavingSupplier(false)
   }
 
   const handleTestPrint = async () => {
@@ -207,10 +272,11 @@ export default function Settings() {
               <input type="text" value={shopInfo.receipt_footer} onChange={(e) => setShopInfo({ ...shopInfo, receipt_footer: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm" placeholder="Thank you for shopping!" />
             </div>
-            <button onClick={saveShopInfo} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
-              <Save size={18} /> Save Shop Info
+            <button onClick={saveShopInfo} disabled={savingShop} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition-all cursor-pointer">
+              <Save size={18} /> {savingShop ? 'Saving...' : 'Save Shop Info'}
             </button>
-            {backupStatus && <p className="text-sm text-green-600">{backupStatus}</p>}
+            {backupStatus && <p className={`text-sm ${backupStatus.includes('❌') ? 'text-red-600' : 'text-green-600'}`}>{backupStatus}</p>}
+            {shopError && <p className="text-sm text-red-600">❌ {shopError}</p>}
           </div>
 
           {/* Categories & Brands */}
@@ -309,7 +375,8 @@ export default function Settings() {
                 </div>
                 <div className="flex gap-2 mt-6">
                   <button onClick={() => setShowUserForm(false)} className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm cursor-pointer">Cancel</button>
-                  <button onClick={createUser} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold cursor-pointer">Create User</button>
+                  {userError && <p className="text-xs text-red-600 mb-2">❌ {userError}</p>}
+              <button onClick={createUser} disabled={savingUser} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">{savingUser ? 'Creating...' : 'Create User'}</button>
                 </div>
               </div>
             </div>
@@ -344,7 +411,8 @@ export default function Settings() {
                 </div>
                 <div className="flex gap-2 mt-6">
                   <button onClick={() => setShowEditUser(null)} className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm cursor-pointer">Cancel</button>
-                  <button onClick={saveEditUser} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold cursor-pointer">Save Changes</button>
+                  {userError && <p className="text-xs text-red-600 mb-2">❌ {userError}</p>}
+              <button onClick={saveEditUser} disabled={savingUser} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">{savingUser ? 'Saving...' : 'Save Changes'}</button>
                 </div>
               </div>
             </div>
@@ -411,20 +479,56 @@ export default function Settings() {
               <h3 className="font-semibold text-gray-900 dark:text-white">Thermal Printer Setup</h3>
               <p className="text-sm text-gray-500 mt-1">Configure your 80mm thermal receipt printer</p>
             </div>
+
+            {/* Auto-detect Printers */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Printer Name</label>
-              <p className="text-xs text-gray-500 mb-2">Enter the printer name as shown in Windows Settings &gt; Printers &amp; Scanners</p>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Detected Printers</label>
+                <button onClick={refreshPrinters} disabled={loadingPrinters}
+                  className="text-xs text-indigo-600 hover:text-indigo-700 disabled:text-gray-400 cursor-pointer">
+                  {loadingPrinters ? 'Scanning...' : '🔄 Refresh'}
+                </button>
+              </div>
+              {printers.length > 0 ? (
+                <div className="space-y-1.5 mb-3">
+                  {printers.map((p, i) => (
+                    <button
+                      key={i}
+                      onClick={() => { setPrinterName(p.name); window.api.setSetting({ key: 'printer_name', value: p.name }) }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm border transition-all cursor-pointer ${
+                        printerName === p.name
+                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300'
+                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      <span className="font-medium">{p.name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${p.status === 'ready' ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                        <span className="text-xs text-gray-400">{p.driver || p.status}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 mb-3">No printers detected. Click Refresh or enter name manually.</p>
+              )}
+            </div>
+
+            {/* Manual Entry */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Or Enter Manually</label>
               <input type="text" value={printerName} onChange={(e) => { setPrinterName(e.target.value); window.api.setSetting({ key: 'printer_name', value: e.target.value }) }}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
                 placeholder="e.g. EPSON TM-T20" />
             </div>
+
             <div className="flex gap-2">
               <button onClick={handleTestPrint} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
                 <TestTube size={18} /> Test Print
               </button>
             </div>
             {printerStatus && (
-              <p className={`text-sm ${printerStatus.includes('✅') ? 'text-green-600' : printerStatus.includes('❌') ? 'text-red-600' : 'text-gray-600'}`}>
+              <p className={`text-sm ${printerStatus.includes('✅') ? 'text-green-600' : printerStatus.includes('❌') ? 'text-red-600' : printerStatus.includes('🔍') ? 'text-indigo-600' : 'text-gray-600'}`}>
                 {printerStatus}
               </p>
             )}
@@ -516,8 +620,8 @@ export default function Settings() {
             <div className="flex gap-2 mt-6">
               <button onClick={() => { setShowAddSupplier(false); setSupplierForm({ name: '', phone: '', address: '' }) }}
                 className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">Cancel</button>
-              <button onClick={handleAddSupplier} disabled={!supplierForm.name.trim()}
-                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">Add Supplier</button>
+              <button onClick={handleAddSupplier} disabled={!supplierForm.name.trim() || savingSupplier}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">{savingSupplier ? 'Adding...' : 'Add Supplier'}</button>
             </div>
           </div>
         </div>

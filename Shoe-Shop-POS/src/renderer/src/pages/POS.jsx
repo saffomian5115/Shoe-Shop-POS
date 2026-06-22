@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/authStore'
 import { formatCurrency } from '../lib/utils'
 import {
   Search, Plus, Minus, Trash2, Printer,
-  DollarSign, CreditCard, Save, X, ShoppingCart
+  DollarSign, CreditCard, Save, X, ShoppingCart, RotateCcw
 } from 'lucide-react'
 
 export default function POS() {
@@ -21,14 +21,28 @@ export default function POS() {
   const [barcodeBuffer, setBarcodeBuffer] = useState('')
   const [printing, setPrinting] = useState(false)
   const [printStatus, setPrintStatus] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const [variantPicker, setVariantPicker] = useState(null)
+  const [cashTendered, setCashTendered] = useState('')
+  const [showRefund, setShowRefund] = useState(false)
+  const [refundBillNo, setRefundBillNo] = useState('')
+  const [refundBill, setRefundBill] = useState(null)
+  const [refundItems, setRefundItems] = useState([])
+  const [refundReason, setRefundReason] = useState('')
+  const [processingRefund, setProcessingRefund] = useState(false)
+  const [refundMsg, setRefundMsg] = useState('')
   const searchRef = useRef(null)
   const barcodeTimer = useRef(null)
   const { subtotal, discountAmount, total } = cart.getTotals()
+  const changeDue = cart.paymentType === 'cash' && cashTendered ? Math.max(0, Number(cashTendered) - total) : 0
 
   // Handle barcode scanner input
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Skip barcode buffer / global shortcuts if focus is on an input or textarea
+      const tag = document.activeElement?.tagName
+      const isInputFocused = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+
       if (e.key === 'F2') {
         e.preventDefault()
         searchRef.current?.focus()
@@ -36,6 +50,9 @@ export default function POS() {
       }
       if (e.key === 'F1') {
         e.preventDefault()
+        if (cart.items.length > 0) {
+          if (!window.confirm('Clear current cart and start a new sale?')) return
+        }
         handleNewSale()
         return
       }
@@ -45,22 +62,25 @@ export default function POS() {
         return
       }
 
-      if (e.key === 'Enter' && barcodeBuffer.length > 0) {
-        e.preventDefault()
-        lookupBarcode(barcodeBuffer)
-        setBarcodeBuffer('')
-        return
-      }
+      // Only process barcode characters when NOT focused on a form input
+      if (!isInputFocused) {
+        if (e.key === 'Enter' && barcodeBuffer.length > 0) {
+          e.preventDefault()
+          lookupBarcode(barcodeBuffer)
+          setBarcodeBuffer('')
+          return
+        }
 
-      if (e.key.length === 1 && !e.ctrlKey && !e.altKey && e.key !== ' ') {
-        setBarcodeBuffer(prev => prev + e.key)
-        clearTimeout(barcodeTimer.current)
-        barcodeTimer.current = setTimeout(() => setBarcodeBuffer(''), 100)
+        if (e.key.length === 1 && !e.ctrlKey && !e.altKey && e.key !== ' ') {
+          setBarcodeBuffer(prev => prev + e.key)
+          clearTimeout(barcodeTimer.current)
+          barcodeTimer.current = setTimeout(() => setBarcodeBuffer(''), 100)
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [barcodeBuffer])
+  }, [barcodeBuffer, cart.items.length])
 
   useEffect(() => {
     loadHeldBills()
@@ -101,6 +121,7 @@ export default function POS() {
     setShowPayment(false)
     setShowReceipt(false)
     setLastSale(null)
+    setCashTendered('')
   }
 
   const handleHoldBill = async () => {
@@ -126,20 +147,22 @@ export default function POS() {
   }
 
   const handlePayment = async () => {
+    if (submitting) return
+    setSubmitting(true)
     try {
       const result = await window.api.createSale({
         sale: {
           customer_name: cart.customerName,
           customer_phone: cart.customerPhone,
           customer_ntn: cart.customerNtn,
-          total_amount: subtotal,
+          total_amount: Math.round(subtotal * 100) / 100,
           discount_type: cart.discountType,
-          discount_value: cart.discountValue,
-          discount_amount: discountAmount,
-          net_amount: total,
+          discount_value: Math.round(cart.discountValue * 100) / 100,
+          discount_amount: Math.round(discountAmount * 100) / 100,
+          net_amount: Math.round(total * 100) / 100,
           payment_type: cart.paymentType,
-          cash_amount: cart.paymentType === 'cash' ? total : (cart.paymentType === 'mixed' ? total / 2 : 0),
-          card_amount: cart.paymentType === 'card' ? total : (cart.paymentType === 'mixed' ? total / 2 : 0),
+          cash_amount: Math.round((cart.paymentType === 'cash' ? total : (cart.paymentType === 'mixed' ? cart.cashAmount : 0)) * 100) / 100,
+          card_amount: Math.round((cart.paymentType === 'card' ? total : (cart.paymentType === 'mixed' ? cart.cardAmount : 0)) * 100) / 100,
           user_id: user?.id
         },
         items: cart.items
@@ -148,8 +171,10 @@ export default function POS() {
         setLastSale({ ...result, items: cart.items, total })
         setShowPayment(false)
         setShowReceipt(true)
+        setCashTendered('')
       }
     } catch (e) { console.error(e) }
+    setSubmitting(false)
   }
 
   const handlePrintReceipt = async () => {
@@ -427,6 +452,10 @@ export default function POS() {
               Held ({heldBills.length})
             </button>
           </div>
+          <button onClick={() => setShowRefund(true)}
+            className="w-full py-2 border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg text-sm hover:bg-red-50 dark:hover:bg-red-900/20 transition-all cursor-pointer mt-2">
+            <RotateCcw size={16} className="inline mr-1" /> Refund / Return
+          </button>
         </div>
       </div>
 
@@ -444,13 +473,33 @@ export default function POS() {
                 <span className="text-gray-500">Payment</span>
                 <span className="text-gray-900 dark:text-white capitalize">{cart.paymentType}</span>
               </div>
+              {cart.paymentType === 'cash' && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Cash Tendered</label>
+                  <input
+                    type="number"
+                    value={cashTendered}
+                    onChange={(e) => setCashTendered(e.target.value)}
+                    placeholder="Enter cash amount..."
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    autoFocus
+                  />
+                  {Number(cashTendered) >= total && Number(cashTendered) > 0 && (
+                    <div className="flex justify-between text-sm mt-2">
+                      <span className="text-green-600 font-medium">Change Due</span>
+                      <span className="text-green-600 font-semibold">{formatCurrency(changeDue)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Change</span>
-                <span className="text-green-600 font-semibold">{formatCurrency(0)}</span>
+                <span className="text-green-600 font-semibold">{formatCurrency(changeDue)}</span>
               </div>
             </div>
-            <button onClick={handlePayment} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold transition-all cursor-pointer">
-              Confirm & Complete Sale
+            <button onClick={handlePayment} disabled={submitting || (cart.paymentType === 'cash' && cashTendered && Number(cashTendered) < total)}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white rounded-xl font-semibold transition-all cursor-pointer">
+              {submitting ? 'Processing...' : 'Confirm & Complete Sale'}
             </button>
           </div>
         </div>
@@ -589,6 +638,155 @@ export default function POS() {
             <button onClick={() => setVariantPicker(null)} className="w-full py-2.5 mt-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer">
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Refund Modal */}
+      {showRefund && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setShowRefund(false); setRefundBill(null); setRefundItems([]); setRefundReason(''); setRefundMsg(''); setRefundBillNo('') }}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <RotateCcw size={20} className="text-red-500" />
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Refund / Return</h3>
+              </div>
+              <button onClick={() => { setShowRefund(false); setRefundBill(null); setRefundItems([]); setRefundReason(''); setRefundMsg(''); setRefundBillNo('') }} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X size={20} /></button>
+            </div>
+
+            {!refundBill ? (
+              <>
+                <p className="text-sm text-gray-500 mb-3">Search for a bill by bill number to process a refund.</p>
+                <div className="flex gap-2 mb-4">
+                  <input type="text" value={refundBillNo} onChange={(e) => setRefundBillNo(e.target.value)}
+                    placeholder="Enter bill number (e.g. BILL-20240622-0001)"
+                    className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none" />
+                  <button onClick={async () => {
+                    if (!refundBillNo.trim()) return
+                    try {
+                      const full = await window.api.getSaleByBillNo({ billNo: refundBillNo.trim() })
+                      if (!full?.items || full.items.length === 0) {
+                        setRefundMsg('❌ Bill not found')
+                        setTimeout(() => setRefundMsg(''), 3000)
+                        return
+                      }
+                      setRefundBill(full)
+                      setRefundItems(full.items.map(item => ({ ...item, refundQty: 0 })))
+                      setRefundMsg('')
+                    } catch (e) {
+                      setRefundMsg(`❌ ${e.message}`)
+                    }
+                  }} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg cursor-pointer">Search</button>
+                </div>
+                {refundMsg && <p className={`text-sm ${refundMsg.includes('❌') ? 'text-red-600' : 'text-green-600'}`}>{refundMsg}</p>}
+              </>
+            ) : (
+              <>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 mb-4">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">Bill:</span>
+                    <span className="font-mono font-medium text-gray-900 dark:text-white">{refundBill.bill_no}</span>
+                  </div>
+                  <div className="flex justify-between text-sm mt-1">
+                    <span className="text-gray-500">Customer:</span>
+                    <span className="text-gray-900 dark:text-white">{refundBill.customer_name || '-'}</span>
+                  </div>
+                  <div className="flex justify-between text-sm mt-1">
+                    <span className="text-gray-500">Total:</span>
+                    <span className="font-semibold text-gray-900 dark:text-white">{formatCurrency(refundBill.net_amount)}</span>
+                  </div>
+                </div>
+
+                <p className="text-xs font-medium text-gray-500 mb-2">Select items & quantities to refund:</p>
+                <div className="space-y-2 mb-4">
+                  {refundItems.map((item, i) => (
+                    <div key={item.id} className="flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                      <input type="checkbox" checked={item.refundQty > 0}
+                        onChange={(e) => {
+                          const updated = [...refundItems]
+                          updated[i] = { ...updated[i], refundQty: e.target.checked ? item.quantity : 0 }
+                          setRefundItems(updated)
+                        }}
+                        className="w-4 h-4 text-red-600 rounded border-gray-300" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.product_name}</p>
+                        <p className="text-xs text-gray-500">{formatCurrency(item.unit_price)} each</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">Qty:</span>
+                        <input type="number" min="0" max={item.quantity} value={item.refundQty}
+                          onChange={(e) => {
+                            const updated = [...refundItems]
+                            updated[i] = { ...updated[i], refundQty: Math.min(Math.max(0, Number(e.target.value)), item.quantity) }
+                            setRefundItems(updated)
+                          }}
+                          className="w-14 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-center outline-none" />
+                        <span className="text-xs text-gray-400">/ {item.quantity}</span>
+                      </div>
+                      <p className="text-sm font-medium text-red-600 w-20 text-right">
+                        -{formatCurrency(item.unit_price * item.refundQty)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Reason for Refund</label>
+                  <input type="text" value={refundReason} onChange={(e) => setRefundReason(e.target.value)}
+                    placeholder="e.g. Customer returned"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none" />
+                </div>
+
+                {(() => {
+                  const selectedItems = refundItems.filter(item => item.refundQty > 0)
+                  const refundTotal = selectedItems.reduce((sum, item) => sum + (item.unit_price * item.refundQty), 0)
+                  return (
+                    <>
+                      {selectedItems.length > 0 && (
+                        <div className="flex justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg mb-4">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Refund Total</span>
+                          <span className="text-sm font-bold text-red-600">{formatCurrency(refundTotal)}</span>
+                        </div>
+                      )}
+                      {refundMsg && <p className={`text-sm mb-2 ${refundMsg.includes('❌') ? 'text-red-600' : 'text-green-600'}`}>{refundMsg}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={() => { setShowRefund(false); setRefundBill(null); setRefundItems([]); setRefundReason(''); setRefundMsg(''); setRefundBillNo('') }}
+                          className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">Cancel</button>
+                        <button onClick={async () => {
+                          const selectedItems = refundItems.filter(item => item.refundQty > 0)
+                          if (selectedItems.length === 0) { setRefundMsg('❌ Select at least one item to refund'); return }
+                          if (processingRefund) return
+                          setProcessingRefund(true)
+                          try {
+                            const result = await window.api.refundSale({
+                              saleId: refundBill.id,
+                              items: selectedItems.map(item => ({ id: item.id, quantity: item.refundQty, subtotal: item.unit_price * item.refundQty })),
+                              user_id: user?.id,
+                              reason: refundReason || 'Customer return'
+                            })
+                            if (result.success) {
+                              setRefundMsg(`✅ Refund processed! Refund bill: ${result.refund_bill_no}`)
+                              setRefundBill(null)
+                              setRefundItems([])
+                              setRefundBillNo('')
+                              setRefundReason('')
+                            } else {
+                              setRefundMsg(`❌ ${result.error}`)
+                            }
+                          } catch (e) {
+                            setRefundMsg(`❌ ${e.message}`)
+                          }
+                          setProcessingRefund(false)
+                        }} disabled={processingRefund}
+                          className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">
+                          {processingRefund ? 'Processing...' : 'Process Refund'}
+                        </button>
+                      </div>
+                    </>
+                  )
+                })()}
+              </>
+            )}
           </div>
         </div>
       )}

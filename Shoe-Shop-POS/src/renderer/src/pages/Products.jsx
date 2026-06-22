@@ -27,6 +27,8 @@ export default function Products() {
   const [importResult, setImportResult] = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [submittingProduct, setSubmittingProduct] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => { loadData() }, [])
 
@@ -77,7 +79,9 @@ export default function Products() {
   }
 
   const handleSave = async () => {
-    if (!form.name || !form.selling_price) return
+    if (!form.name || !form.selling_price || submittingProduct) return
+    setSubmittingProduct(true)
+    setSaveError('')
 
     // Auto-detect variants: if size or color contains commas, generate variants
     const sizes = form.size.split(',').map(s => s.trim()).filter(Boolean)
@@ -116,7 +120,10 @@ export default function Products() {
       if (result.success) {
         setShowForm(false)
         loadData()
+      } else {
+        setSaveError(result.error || 'Failed to create variants')
       }
+      setSubmittingProduct(false)
       return
     }
 
@@ -131,7 +138,10 @@ export default function Products() {
     if (result.success) {
       setShowForm(false)
       loadData()
+    } else {
+      setSaveError(result.error || 'Failed to save product')
     }
+    setSubmittingProduct(false)
   }
 
   const toggleActive = async (id) => {
@@ -538,10 +548,15 @@ export default function Products() {
               </div>
             )}
 
-            <div className="flex gap-2 mt-6">
+            {saveError && (
+              <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-xs text-red-600 dark:text-red-400">❌ {saveError}</p>
+              </div>
+            )}
+            <div className="flex gap-2 mt-3">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer">Cancel</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-all cursor-pointer">
-                {editingProduct ? 'Update' : isVariantForm ? `Create ${variantCount} Variants` : 'Create'} Product
+              <button onClick={handleSave} disabled={submittingProduct} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold transition-all cursor-pointer">
+                {submittingProduct ? 'Saving...' : (editingProduct ? 'Update' : isVariantForm ? `Create ${variantCount} Variants` : 'Create') + ' Product'}
               </button>
             </div>
           </div>

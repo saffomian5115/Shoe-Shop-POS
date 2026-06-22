@@ -50,17 +50,25 @@ export default function Dashboard({ onNavigate }) {
   const [dateFilter, setDateFilter] = useState('today')
   const [loading, setLoading] = useState(true)
 
+  const getLocalDateString = (date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
   const getDateRange = (filter) => {
     const now = new Date()
-    const today = now.toISOString().split('T')[0]
+    // Use local timezone date to avoid UTC day-boundary issues
+    const today = getLocalDateString(now)
     if (filter === 'today') return { date_from: today, date_to: today }
     if (filter === 'week') {
-      const weekAgo = new Date(now.setDate(now.getDate() - 7)).toISOString().split('T')[0]
-      return { date_from: weekAgo, date_to: today }
+      const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7)
+      return { date_from: getLocalDateString(weekAgo), date_to: today }
     }
     if (filter === 'month') {
-      const monthAgo = new Date(now.setMonth(now.getMonth() - 1)).toISOString().split('T')[0]
-      return { date_from: monthAgo, date_to: today }
+      const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
+      return { date_from: getLocalDateString(monthAgo), date_to: today }
     }
     return { date_from: today, date_to: today }
   }

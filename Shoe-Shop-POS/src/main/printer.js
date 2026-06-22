@@ -1,4 +1,4 @@
-import { ThermalPrinter, PrinterTypes, CharacterSet, BreakLine } from 'node-thermal-printer'
+import { ThermalPrinter, PrinterTypes, CharacterSet, BreakLine, BarcodeType } from 'node-thermal-printer'
 
 let printer = null
 let currentPrinterName = ''
@@ -121,7 +121,7 @@ export async function printReceipt(receiptText, printerName) {
   }
 }
 
-export async function printBarcodeLabel(barcode, productName, price, printerName) {
+export async function printBarcodeLabel(barcode, productName, price, printerName, copies = 1) {
   try {
     const p = getPrinter(printerName)
     if (!p) {
@@ -133,15 +133,33 @@ export async function printBarcodeLabel(barcode, productName, price, printerName
       return { success: false, error: 'Printer not connected' }
     }
 
-    p.clear()
-    p.println(productName)
-    p.println(`Price: Rs. ${price}`)
-    p.println(`Barcode: ${barcode}`)
+    for (let i = 0; i < copies; i++) {
+      p.clear()
+      p.println(productName)
+      p.println(`Price: Rs. ${price}`)
+      p.newLine()
+      // Print actual scannable CODE128 barcode
+      p.printBarcode(barcode, {
+        type: BarcodeType.CODE128,
+        width: 2,
+        height: 48,
+        hriPosition: 'below',
+        hriFont: 0
+      })
+      p.newLine()
+      p.println(`Code: ${barcode}`)
+      if (i < copies - 1) {
+        // Feed between labels
+        p.newLine()
+        p.newLine()
+      }
+    }
     p.cut()
 
     const result = await p.execute()
-    return { success: true, message: 'Label printed successfully' }
+    return { success: true, message: `${copies} barcode label(s) printed successfully` }
   } catch (error) {
+    console.error('Barcode print error:', error)
     return { success: false, error: error.message }
   }
 }

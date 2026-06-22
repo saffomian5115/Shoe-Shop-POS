@@ -21,6 +21,7 @@ export default function Inventory() {
   const [adjustForm, setAdjustForm] = useState({ new_qty: 0, reason_type: 'Physical Count', reason: '' })
   const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', invoice_no: '', items: [{ product_id: '', quantity: 1, buying_price: 0 }] })
   const [expandedGroups, setExpandedGroups] = useState(new Set())
+  const [savingSupplier, setSavingSupplier] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -110,16 +111,26 @@ export default function Inventory() {
   }
 
   const handleAddSupplier = async () => {
-    if (!supplierForm.name.trim()) return
-    await window.api.createSupplier({
-      name: supplierForm.name.trim(),
-      phone: supplierForm.phone.trim(),
-      address: supplierForm.address.trim()
-    })
-    setShowAddSupplier(false)
-    setSupplierForm({ name: '', phone: '', address: '' })
-    const supps = await window.api.getSuppliers()
-    setSuppliers(supps)
+    if (!supplierForm.name.trim() || savingSupplier) return
+    setSavingSupplier(true)
+    try {
+      const result = await window.api.createSupplier({
+        name: supplierForm.name.trim(),
+        phone: supplierForm.phone.trim(),
+        address: supplierForm.address.trim()
+      })
+      if (result.success) {
+        setShowAddSupplier(false)
+        setSupplierForm({ name: '', phone: '', address: '' })
+        const supps = await window.api.getSuppliers()
+        setSuppliers(supps)
+      } else {
+        alert(`Failed to add supplier: ${result.error}`)
+      }
+    } catch (e) {
+      alert(`Failed to add supplier: ${e.message}`)
+    }
+    setSavingSupplier(false)
   }
 
   return (
@@ -477,8 +488,8 @@ export default function Inventory() {
             <div className="flex gap-2 mt-6">
               <button onClick={() => { setShowAddSupplier(false); setSupplierForm({ name: '', phone: '', address: '' }) }}
                 className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">Cancel</button>
-              <button onClick={handleAddSupplier} disabled={!supplierForm.name.trim()}
-                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">Add Supplier</button>
+              <button onClick={handleAddSupplier} disabled={!supplierForm.name.trim() || savingSupplier}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">{savingSupplier ? 'Adding...' : 'Add Supplier'}</button>
             </div>
           </div>
         </div>

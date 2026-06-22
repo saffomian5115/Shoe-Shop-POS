@@ -82,14 +82,14 @@ export const useCartStore = create((set, get) => ({
 
   getTotals: () => {
     const { items, discountType, discountValue } = get()
-    const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0)
+    const subtotal = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100
     let discountAmount = 0
     if (discountType === 'amount') {
-      discountAmount = discountValue
+      discountAmount = Math.round(discountValue * 100) / 100
     } else if (discountType === 'percentage') {
-      discountAmount = (subtotal * discountValue) / 100
+      discountAmount = Math.round((subtotal * discountValue) / 100 * 100) / 100
     }
-    const total = subtotal - discountAmount
+    const total = Math.round((subtotal - discountAmount) * 100) / 100
     return { subtotal, discountAmount, total }
   }
 }))

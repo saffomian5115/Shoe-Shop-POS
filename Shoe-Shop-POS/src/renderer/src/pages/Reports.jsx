@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency, formatDate } from '../lib/utils'
-import { Download, Printer, BarChart3, TrendingUp, PieChart } from 'lucide-react'
+import { useAuthStore } from '../store/authStore'
+import { Download, Printer, BarChart3, TrendingUp, PieChart, XCircle, RotateCcw } from 'lucide-react'
 
 export default function Reports() {
+  const { user } = useAuthStore()
+  const isCashier = user?.role === 'cashier'
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date()
     d.setDate(d.getDate() - 30)
@@ -15,6 +18,9 @@ export default function Reports() {
   const [topProducts, setTopProducts] = useState([])
   const [recentBills, setRecentBills] = useState([])
   const [activeTab, setActiveTab] = useState('sales')
+  const [actionMsg, setActionMsg] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [printStatus, setPrintStatus] = useState('')
 
   useEffect(() => {
     if (dateFrom && dateTo) loadReports()
@@ -214,11 +220,15 @@ export default function Reports() {
                 <th className="p-3">Amount</th>
                 <th className="p-3">Payment</th>
                 <th className="p-3">Status</th>
+                <th className="p-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {recentBills.map(bill => (
-                <tr key={bill.id} className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all">
+              {recentBills.map(bill => {
+                const isRefund = bill.bill_no?.startsWith('RFND-')
+                const isVoid = bill.status === 'void'
+                return (
+                <tr key={bill.id} className={`border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all ${isVoid ? 'opacity-60' : ''} ${isRefund ? 'bg-orange-50 dark:bg-orange-900/10' : ''}`}>
                   <td className="p-3 text-sm font-mono text-gray-900 dark:text-white">{bill.bill_no}</td>
                   <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(bill.created_at)}</td>
                   <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{bill.customer_name || '-'}</td>
@@ -231,15 +241,95 @@ export default function Reports() {
                     }`}>{bill.payment_type}</span>
                   </td>
                   <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${bill.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{bill.status}</span>
+                    {isRefund ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">Refund</span>
+                    ) : (
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${bill.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>{bill.status}</span>
+                    )}
+                  </td>
+                  <td className="p-3">
+                    <div className="flex gap-1">
+                      {/* Reprint button */}
+                      <button onClick={async () => {
+                        setPrintStatus('')
+                        try {
+                          const printerName = await window.api.getSetting('printer_name')
+                          if (!printerName) {
+                            setActionMsg('❌ No printer configured')
+                            setTimeout(() => setActionMsg(''), 3000)
+                            return
+                          }
+                          const result = await window.api.printReceipt({ saleId: bill.id, printerName })
+                          if (result.success) {
+                            setActionMsg('✅ Receipt sent to printer!')
+                          } else {
+                            setActionMsg(`❌ ${result.error}`)
+                          }
+                        } catch (e) {
+                          setActionMsg(`❌ ${e.message}`)
+                        }
+                        setTimeout(() => setActionMsg(''), 3000)
+                      }}
+                        className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-indigo-600 cursor-pointer" title="Reprint">
+                        <Printer size={15} />
+                      </button>
+                      {/* Void button (Admin only) — only for active, non-refund bills */}
+                      {!isCashier && bill.status === 'active' && !isRefund && (
+                        <button onClick={async () => {
+                          if (!confirm(`Void bill ${bill.bill_no} (Rs. ${formatCurrency(bill.net_amount)})? This will restore stock.`)) return
+                          try {
+                            const result = await window.api.voidSale({ id: bill.id, user_id: user?.id })
+                            if (result.success) {
+                              setActionMsg(`✅ Bill ${bill.bill_no} voided`)
+                              loadReports()
+                            } else {
+                              setActionMsg(`❌ ${result.error}`)
+                            }
+                          } catch (e) {
+                            setActionMsg(`❌ ${e.message}`)
+                          }
+                          setTimeout(() => setActionMsg(''), 3000)
+                        }}
+                          className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-500 hover:text-red-600 cursor-pointer" title="Void Bill">
+                          <XCircle size={15} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
-              ))}
-              {recentBills.length === 0 && <tr><td colSpan={6} className="text-center text-sm text-gray-400 py-8">No bills found</td></tr>}
+              )})}
+              {recentBills.length === 0 && <tr><td colSpan={7} className="text-center text-sm text-gray-400 py-8">No bills found</td></tr>}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Export & Action Messages */}
+      <div className="flex gap-2 items-center flex-wrap">
+        {activeTab !== 'bills' && (
+          <button onClick={async () => {
+            setExporting(true)
+            try {
+              const result = await window.api.exportSalesReport({ date_from: dateFrom, date_to: dateTo })
+              if (result.success) {
+                setActionMsg(`✅ Exported ${result.count} records`)
+              } else if (result.error !== 'Export cancelled') {
+                setActionMsg(`❌ ${result.error}`)
+              }
+            } catch (e) {
+              setActionMsg(`❌ ${e.message}`)
+            }
+            setExporting(false)
+            setTimeout(() => setActionMsg(''), 5000)
+          }} disabled={exporting}
+            className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-medium transition-all cursor-pointer">
+            <Download size={16} /> {exporting ? 'Exporting...' : 'Export to Excel'}
+          </button>
+        )}
+        {actionMsg && (
+          <span className={`text-sm font-medium ${actionMsg.includes('✅') ? 'text-green-600' : 'text-red-600'}`}>{actionMsg}</span>
+        )}
+      </div>
     </div>
   )
 }
