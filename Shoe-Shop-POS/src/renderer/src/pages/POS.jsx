@@ -244,7 +244,13 @@ export default function POS() {
                         className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all text-left"
                         whileHover={{ scale: 1.01 }}
                       >
-                        <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg">👟</div>
+                        <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-sm overflow-hidden flex-shrink-0">
+                          {p.image_path ? (
+                            <img src={p.image_path} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-lg">👟</span>
+                          )}
+                        </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.name}</p>
                           <p className="text-xs text-gray-500">{p.category_name} {p.size && `- Size ${p.size}`} {p.color && `- ${p.color}`}</p>
@@ -268,7 +274,13 @@ export default function POS() {
                         className="w-full flex items-center gap-3 p-3 hover:bg-indigo-50 dark:hover:bg-gray-800 transition-all text-left border-l-4 border-indigo-500"
                         whileHover={{ scale: 1.01 }}
                       >
-                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center text-lg">📦</div>
+                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center text-sm overflow-hidden flex-shrink-0">
+                          {group.variants[0]?.image_path ? (
+                            <img src={group.variants[0].image_path} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-lg">📦</span>
+                          )}
+                        </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{group.name}</p>
                           <p className="text-xs text-indigo-500 font-medium">{colors.length} colors × {sizes.length} sizes — tap to select</p>
@@ -302,8 +314,12 @@ export default function POS() {
                 exit={{ opacity: 0, x: 20 }}
                 className="flex items-center gap-3 p-3 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800"
               >
-                <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg flex-shrink-0">
-                  👟
+                <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {item.product_image ? (
+                    <img src={item.product_image} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-lg">👟</span>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.product_name}</p>

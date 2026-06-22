@@ -1,10 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { formatCurrency, generateBarcode } from '../lib/utils'
+import { useAuthStore } from '../store/authStore'
 import { Plus, Search, Edit2, Image, Grid3X3, List, QrCode, Printer, Upload, Download, Trash2, AlertTriangle } from 'lucide-react'
 import JsBarcode from 'jsbarcode'
 
 export default function Products() {
+  const { user } = useAuthStore()
+  const isCashier = user?.role === 'cashier'
   const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
   const [brands, setBrands] = useState([])
@@ -260,12 +263,16 @@ export default function Products() {
           <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all cursor-pointer">
             <Download size={18} /> Export
           </button>
-          <button onClick={handleImport} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-all cursor-pointer">
-            <Upload size={18} /> Import
-          </button>
-          <button onClick={openNewForm} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
-            <Plus size={18} /> Add Product
-          </button>
+          {!isCashier && (
+            <>
+              <button onClick={handleImport} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-all cursor-pointer">
+                <Upload size={18} /> Import
+              </button>
+              <button onClick={openNewForm} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
+                <Plus size={18} /> Add Product
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -328,7 +335,13 @@ export default function Products() {
                   >
                   <td className="p-3">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded flex items-center justify-center text-sm">👟</div>
+                      <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded flex items-center justify-center text-sm overflow-hidden flex-shrink-0">
+                        {p.image_path ? (
+                          <img src={p.image_path} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span>👟</span>
+                        )}
+                      </div>
                       <span className="text-sm font-medium text-gray-900 dark:text-white">{p.name}</span>
                     </div>
                   </td>
@@ -343,9 +356,15 @@ export default function Products() {
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.active ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>{p.active ? 'Active' : 'Inactive'}</span>
                   </td>                    <td className="p-3">
                     <div className="flex gap-1">
-                      <button onClick={() => openEditForm(p)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-indigo-600 cursor-pointer" title="Edit"><Edit2 size={16} /></button>
-                      <button onClick={() => toggleActive(p.id)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-orange-600 cursor-pointer" title={p.active ? 'Deactivate' : 'Activate'}>{p.active ? '🟢' : '🔴'}</button>
-                      <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-500 hover:text-red-600 cursor-pointer" title="Delete"><Trash2 size={16} /></button>
+                      {isCashier ? (
+                        <span className="text-xs text-gray-400 italic">View only</span>
+                      ) : (
+                        <>
+                          <button onClick={() => openEditForm(p)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-indigo-600 cursor-pointer" title="Edit"><Edit2 size={16} /></button>
+                          <button onClick={() => toggleActive(p.id)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-orange-600 cursor-pointer" title={p.active ? 'Deactivate' : 'Activate'}>{p.active ? '🟢' : '🔴'}</button>
+                          <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-500 hover:text-red-600 cursor-pointer" title="Delete"><Trash2 size={16} /></button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </motion.tr>
@@ -362,13 +381,19 @@ export default function Products() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {filteredProducts.map(p => (
             <div key={p.id} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 hover:shadow-md transition-all">
-              <div className="w-full h-32 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center text-4xl mb-3">👟</div>
+              <div className="w-full h-32 bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center text-4xl mb-3 overflow-hidden">
+                {p.image_path ? (
+                  <img src={p.image_path} alt={p.name} className="w-full h-full object-cover" />
+                ) : (
+                  <span>👟</span>
+                )}
+              </div>
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white truncate">{p.name}</h3>
               <p className="text-xs text-gray-500">{p.category_name} {p.size && `- ${p.size}`}</p>
               <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400 mt-2">{formatCurrency(p.selling_price)}</p>
               <div className="flex items-center justify-between mt-2">
                 <span className={`text-xs ${p.stock <= p.min_stock_level ? 'text-red-500' : 'text-gray-500'}`}>Stock: {p.stock}</span>
-                <button onClick={() => openEditForm(p)} className="text-xs text-indigo-600 hover:text-indigo-700 cursor-pointer">Edit</button>
+                {!isCashier && <button onClick={() => openEditForm(p)} className="text-xs text-indigo-600 hover:text-indigo-700 cursor-pointer">Edit</button>}
               </div>
             </div>
           ))}

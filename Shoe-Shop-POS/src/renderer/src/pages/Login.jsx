@@ -4,6 +4,14 @@ import { useAuthStore } from '../store/authStore'
 import { useUiStore } from '../store/uiStore'
 import { LogIn, Eye, EyeOff } from 'lucide-react'
 
+// Load shop icon for login page
+let loginIcon = null
+try {
+  loginIcon = new URL('../assets/icon.png', import.meta.url).href
+} catch (e) {
+  // Icon file not found
+}
+
 export default function Login() {
   const { login, loading } = useAuthStore()
   const { theme, toggleTheme } = useUiStore()
@@ -66,13 +74,22 @@ export default function Login() {
             transition={{ delay: 0.1 }}
             className="text-center space-y-2"
           >
-            <motion.div
-              animate={{ rotate: [0, -10, 10, -10, 0] }}
-              transition={{ duration: 1.5, delay: 0.5 }}
-              className="text-5xl mb-3"
-            >
-              👟
-            </motion.div>
+            <div className="mb-4 flex justify-center">
+              {loginIcon ? (
+                <img src={loginIcon} alt="Shop Logo"
+                  className="w-20 h-20 object-contain rounded-2xl"
+                  onError={(e) => { e.target.style.display = 'none' }}
+                />
+              ) : (
+                <motion.div
+                  animate={{ rotate: [0, -10, 10, -10, 0] }}
+                  transition={{ duration: 1.5, delay: 0.5 }}
+                  className="text-5xl"
+                >
+                  👟
+                </motion.div>
+              )}
+            </div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Shoe Shop POS</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">Point of Sale System</p>
           </motion.div>

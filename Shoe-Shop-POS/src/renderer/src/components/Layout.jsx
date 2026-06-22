@@ -7,12 +7,19 @@ import {
   BarChart3, Settings, LogOut, Menu, Sun, Moon,
   ChevronLeft, ChevronRight
 } from 'lucide-react'
+// User can place their shop icon file at: src/renderer/assets/icon.png
+let shopIcon = null
+try {
+  shopIcon = new URL('../assets/icon.png', import.meta.url).href
+} catch (e) {
+  // Icon file not found — will show text only
+}
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'cashier'] },
   { id: 'pos', label: 'POS / Billing', icon: ShoppingCart, roles: ['admin', 'cashier'] },
-  { id: 'products', label: 'Products', icon: Package, roles: ['admin'] },
-  { id: 'inventory', label: 'Inventory', icon: Boxes, roles: ['admin'] },
+  { id: 'products', label: 'Products', icon: Package, roles: ['admin', 'cashier'] },
+  { id: 'inventory', label: 'Inventory', icon: Boxes, roles: ['admin', 'cashier'] },
   { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['admin'] },
   { id: 'settings', label: 'Settings', icon: Settings, roles: ['admin'] }
 ]
@@ -34,9 +41,19 @@ export default function Layout({ children, currentPage, onNavigate }) {
         {/* Logo */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800">
           {!collapsed && (
-            <div>
-              <h1 className="text-lg font-bold text-indigo-700 dark:text-indigo-400">Shoe Shop</h1>
-              <p className="text-xs text-gray-500 dark:text-gray-400">POS System</p>
+            <div className="flex items-center gap-2.5">
+              {shopIcon && (
+                <img
+                  src={shopIcon}
+                  alt="Logo"
+                  className="w-8 h-8 rounded-lg object-contain"
+                  onError={(e) => { e.target.style.display = 'none' }}
+                />
+              )}
+              <div>
+                <h1 className="text-lg font-bold text-indigo-700 dark:text-indigo-400">Shoe Shop</h1>
+                <p className="text-xs text-gray-500 dark:text-gray-400">POS System</p>
+              </div>
             </div>
           )}
           <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500">

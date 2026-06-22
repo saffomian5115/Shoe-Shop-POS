@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useUiStore } from '../store/uiStore'
-import { Save, Users, Printer, Database, Download, Upload, Sun, Moon, Building2, TestTube, Edit2 } from 'lucide-react'
+import { Save, Users, Printer, Database, Download, Upload, Sun, Moon, Building2, TestTube, Edit2, Truck, Phone, MapPin, UserPlus } from 'lucide-react'
 
 export default function Settings() {
   const { theme, toggleTheme } = useUiStore()
@@ -17,6 +17,9 @@ export default function Settings() {
   const [brands, setBrands] = useState([])
   const [newCategory, setNewCategory] = useState('')
   const [newBrand, setNewBrand] = useState('')
+  const [suppliers, setSuppliers] = useState([])
+  const [showAddSupplier, setShowAddSupplier] = useState(false)
+  const [supplierForm, setSupplierForm] = useState({ name: '', phone: '', address: '' })
   const [printerName, setPrinterName] = useState('')
   const [printerStatus, setPrinterStatus] = useState('')
 
@@ -26,11 +29,12 @@ export default function Settings() {
 
   const loadSettings = async () => {
     try {
-      const [shop, usrs, cats, brds, lastBk, savedPrinterName] = await Promise.all([
+      const [shop, usrs, cats, brds, supps, lastBk, savedPrinterName] = await Promise.all([
         window.api.getShopInfo(),
         window.api.getUsers(),
         window.api.getCategories(),
         window.api.getBrands(),
+        window.api.getSuppliers(),
         window.api.getLastBackupTime(),
         window.api.getSetting('printer_name')
       ])
@@ -38,6 +42,7 @@ export default function Settings() {
       setUsers(usrs)
       setCategories(cats)
       setBrands(brds)
+      setSuppliers(supps)
       setLastBackup(lastBk)
       if (savedPrinterName) setPrinterName(savedPrinterName)
     } catch (e) { console.error(e) }
@@ -108,6 +113,19 @@ export default function Settings() {
     loadSettings()
   }
 
+  const handleAddSupplier = async () => {
+    if (!supplierForm.name.trim()) return
+    await window.api.createSupplier({
+      name: supplierForm.name.trim(),
+      phone: supplierForm.phone.trim(),
+      address: supplierForm.address.trim()
+    })
+    setShowAddSupplier(false)
+    setSupplierForm({ name: '', phone: '', address: '' })
+    const supps = await window.api.getSuppliers()
+    setSuppliers(supps)
+  }
+
   const handleTestPrint = async () => {
     if (!printerName) {
       setPrinterStatus('❌ Please enter a printer name first')
@@ -130,6 +148,7 @@ export default function Settings() {
   const tabs = [
     { id: 'shop', label: 'Shop Info', icon: Building2 },
     { id: 'users', label: 'Users', icon: Users },
+    { id: 'suppliers', label: 'Suppliers', icon: Truck },
     { id: 'printer', label: 'Printer', icon: Printer },
     { id: 'backup', label: 'Backup', icon: Database },
     { id: 'theme', label: 'Theme', icon: theme === 'light' ? Sun : Moon }
@@ -333,6 +352,57 @@ export default function Settings() {
         </div>
       )}
 
+      {/* Suppliers */}
+      {activeTab === 'suppliers' && (
+        <div className="max-w-xl">
+          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white">Supplier Management</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Manage your suppliers and their contact information</p>
+              </div>
+              <button onClick={() => setShowAddSupplier(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded-lg cursor-pointer transition-all">
+                <UserPlus size={16} /> Add Supplier
+              </button>
+            </div>
+            {suppliers.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">No suppliers yet. Click "Add Supplier" to register one.</p>
+            ) : (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800">
+                {suppliers.map(s => (
+                  <div key={s.id} className="flex items-center gap-4 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-all">
+                    <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center flex-shrink-0">
+                      <Building2 size={18} className="text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{s.name}</p>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 mt-1">
+                        {s.phone ? (
+                          <span className="flex items-center gap-1">
+                            <Phone size={12} /> {s.phone}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 italic">No phone</span>
+                        )}
+                        {s.address ? (
+                          <span className="flex items-center gap-1 truncate max-w-[250px]">
+                            <MapPin size={12} /> {s.address}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 italic">No address</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-gray-400 bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">ID: {s.id}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Printer Setup */}
       {activeTab === 'printer' && (
         <div className="max-w-xl space-y-4">
@@ -391,6 +461,64 @@ export default function Settings() {
             <p className="text-sm text-amber-700 dark:text-amber-400">
               ⚡ Google Drive backup integration coming soon. For now, backups are saved locally to your Documents folder.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Add Supplier Modal */}
+      {showAddSupplier && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setShowAddSupplier(false); setSupplierForm({ name: '', phone: '', address: '' }) }}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center">
+                <Building2 size={20} className="text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Add New Supplier</h3>
+                <p className="text-xs text-gray-500">Register a new supplier in the system</p>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  Supplier Name <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Building2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input type="text" value={supplierForm.name}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })}
+                    placeholder="e.g. Al-Fajar Shoes Distributor"
+                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none" />
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1">Full name or company name of the supplier</p>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Phone Number</label>
+                <div className="relative">
+                  <Phone size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input type="text" value={supplierForm.phone}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })}
+                    placeholder="e.g. 0300-1234567"
+                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Address</label>
+                <div className="relative">
+                  <MapPin size={16} className="absolute left-3 top-3 text-gray-400" />
+                  <textarea value={supplierForm.address}
+                    onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })}
+                    placeholder="e.g. Shop #5, Shah Alam Market, Lahore"
+                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none" rows={2} />
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button onClick={() => { setShowAddSupplier(false); setSupplierForm({ name: '', phone: '', address: '' }) }}
+                className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer">Cancel</button>
+              <button onClick={handleAddSupplier} disabled={!supplierForm.name.trim()}
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm font-semibold cursor-pointer">Add Supplier</button>
+            </div>
           </div>
         </div>
       )}

@@ -29,6 +29,7 @@ export const useCartStore = create((set, get) => ({
           {
             product_id: product.id,
             product_name: product.name,
+            product_image: product.image_path || null,
             quantity: 1,
             unit_price: product.selling_price,
             discount: 0,
