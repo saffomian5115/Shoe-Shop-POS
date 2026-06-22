@@ -79,7 +79,11 @@ const api = {
   printBarcodeLabel: (data) => ipcRenderer.invoke('print:barcode-label', data),
 
   // Barcode
-  generateBarcode: (text) => ipcRenderer.invoke('barcode:generate', text)
+  generateBarcode: (text) => ipcRenderer.invoke('barcode:generate', text),
+
+  // Excel
+  exportProducts: () => ipcRenderer.invoke('excel:export-products'),
+  importProducts: () => ipcRenderer.invoke('excel:import-products')
 }
 
 if (process.contextIsolated) {

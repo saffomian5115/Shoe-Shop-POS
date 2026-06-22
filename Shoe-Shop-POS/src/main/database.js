@@ -21,7 +21,7 @@ export function getDb() {
   return db
 }
 
-export function initializeDatabase() {
+export async function initializeDatabase() {
   const database = getDb()
 
   database.exec(`
@@ -170,6 +170,10 @@ export function initializeDatabase() {
     const insert = database.prepare('INSERT INTO categories (name) VALUES (?)')
     defaultCats.forEach(cat => insert.run(cat))
   }
+
+  // Seed comprehensive test data if database is empty
+  const { seedDatabase } = await import('./seed')
+  seedDatabase()
 
   console.log('Database initialized successfully')
 }

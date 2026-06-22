@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, dialog } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
@@ -540,6 +540,159 @@ export function registerIpcHandlers() {
   ipcMain.handle('print:barcode-label', async (_, { barcode, productName, price, printerName }) => {
     const { printBarcodeLabel } = await import('./printer')
     return printBarcodeLabel(barcode, productName, price, printerName)
+  })
+
+  // ==================== EXCEL IMPORT/EXPORT ====================
+  ipcMain.handle('excel:export-products', async () => {
+    try {
+      const db = getDb()
+      const products = db.prepare(`SELECT p.name, c.name as category, b.name as brand, p.gender, p.size, p.color,
+        p.buying_price, p.selling_price, p.stock, p.min_stock_level, p.barcode, p.active
+        FROM products p LEFT JOIN categories c ON p.category_id = c.id
+        LEFT JOIN brands b ON p.brand_id = b.id ORDER BY p.name`).all()
+
+      const result = await dialog.showSaveDialog({
+        title: 'Export Products',
+        defaultPath: 'products_export.xlsx',
+        filters: [{ name: 'Excel Files', extensions: ['xlsx'] }]
+      })
+      if (result.canceled) return { success: false, error: 'Export cancelled' }
+
+      const XLSX = await import('xlsx')
+      const data = products.map(p => ({
+        Name: p.name,
+        Category: p.category || '',
+        Brand: p.brand || '',
+        Gender: p.gender || '',
+        Size: p.size || '',
+        Color: p.color || '',
+        'Buying Price': p.buying_price,
+        'Selling Price': p.selling_price,
+        Stock: p.stock,
+        'Min Stock': p.min_stock_level,
+        Barcode: p.barcode || '',
+        Active: p.active ? 'Yes' : 'No'
+      }))
+
+      const workbook = XLSX.utils.book_new()
+      const sheet = XLSX.utils.json_to_sheet(data)
+      XLSX.utils.book_append_sheet(workbook, sheet, 'Products')
+      XLSX.writeFile(workbook, result.filePath)
+
+      return { success: true, path: result.filePath, count: products.length }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('excel:import-products', async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: 'Import Products',
+        filters: [{ name: 'Excel Files', extensions: ['xlsx', 'xls'] }],
+        properties: ['openFile']
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: 'Import cancelled' }
+      }
+
+      const XLSX = await import('xlsx')
+      const workbook = XLSX.readFile(result.filePaths[0])
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet)
+
+      if (rows.length === 0) return { success: false, error: 'Excel file is empty' }
+
+      const db = getDb()
+      let imported = 0
+      let skipped = 0
+      let errors = []
+
+      const getOrCreateCategory = (name) => {
+        if (!name || name.trim() === '') return null
+        const existing = db.prepare('SELECT id FROM categories WHERE name = ?').get(name.trim())
+        if (existing) return existing.id
+        const result = db.prepare('INSERT INTO categories (name) VALUES (?)').run(name.trim())
+        return result.lastInsertRowid
+      }
+
+      const getOrCreateBrand = (name) => {
+        if (!name || name.trim() === '') return null
+        const existing = db.prepare('SELECT id FROM brands WHERE name = ?').get(name.trim())
+        if (existing) return existing.id
+        const result = db.prepare('INSERT INTO brands (name) VALUES (?)').run(name.trim())
+        return result.lastInsertRowid
+      }
+
+      const barcodeLookup = db.prepare('SELECT id FROM products WHERE barcode = ? AND barcode IS NOT NULL')
+      const nameLookup = db.prepare("SELECT id FROM products WHERE name = ? COLLATE NOCASE")
+      const insertProduct = db.prepare(`INSERT INTO products
+        (name, category_id, brand_id, gender, size, color, buying_price, selling_price, stock, min_stock_level, barcode, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`)
+      const updateProduct = db.prepare(`UPDATE products SET
+        name=?, category_id=?, brand_id=?, gender=?, size=?, color=?, buying_price=?, selling_price=?, stock=?, min_stock_level=?, barcode=?, active=1, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?`)
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        const name = String(row['Name'] || '').trim()
+        if (!name) {
+          errors.push(`Row ${i + 2}: Missing product name, skipped`)
+          skipped++
+          continue
+        }
+
+        try {
+          const categoryId = getOrCreateCategory(String(row['Category'] || ''))
+          const brandId = getOrCreateBrand(String(row['Brand'] || ''))
+          const barcode = String(row['Barcode'] || '').trim()
+
+          // Find existing product by barcode or name to avoid duplicates
+          let existing = null
+          if (barcode) {
+            existing = barcodeLookup.get(barcode)
+          }
+          if (!existing) {
+            existing = nameLookup.get(name)
+          }
+
+          if (existing) {
+            updateProduct.run(
+              name, categoryId, brandId,
+              String(row['Gender'] || ''),
+              String(row['Size'] || ''),
+              String(row['Color'] || ''),
+              Number(row['Buying Price'] || row['BuyingPrice'] || 0),
+              Number(row['Selling Price'] || row['SellingPrice'] || 0),
+              Number(row['Stock'] || 0),
+              Number(row['Min Stock'] || row['MinStock'] || 5),
+              barcode,
+              existing.id
+            )
+          } else {
+            insertProduct.run(
+              name, categoryId, brandId,
+              String(row['Gender'] || ''),
+              String(row['Size'] || ''),
+              String(row['Color'] || ''),
+              Number(row['Buying Price'] || row['BuyingPrice'] || 0),
+              Number(row['Selling Price'] || row['SellingPrice'] || 0),
+              Number(row['Stock'] || 0),
+              Number(row['Min Stock'] || row['MinStock'] || 5),
+              barcode
+            )
+          }
+          imported++
+        } catch (e) {
+          errors.push(`Row ${i + 2}: ${e.message}`)
+          skipped++
+        }
+      }
+
+      return { success: true, imported, skipped, errors }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
   })
 
   // ==================== BARCODE GENERATION ====================

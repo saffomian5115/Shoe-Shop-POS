@@ -38,11 +38,11 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.shoeshop.pos')
 
   // Initialize database
-  initializeDatabase()
+  await initializeDatabase()
 
   // Register all IPC handlers
   registerIpcHandlers()

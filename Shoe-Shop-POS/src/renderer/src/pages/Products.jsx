@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { formatCurrency, generateBarcode } from '../lib/utils'
-import { Plus, Search, Edit2, Image, Grid3X3, List, QrCode, Printer } from 'lucide-react'
+import { Plus, Search, Edit2, Image, Grid3X3, List, QrCode, Printer, Upload, Download } from 'lucide-react'
 import JsBarcode from 'jsbarcode'
 
 export default function Products() {
@@ -19,6 +19,9 @@ export default function Products() {
     buying_price: '', selling_price: '', stock: '', min_stock_level: 5, barcode: ''
   })
   const [barcodePreview, setBarcodePreview] = useState(null)
+  const [importStatus, setImportStatus] = useState('')
+  const [showImportResult, setShowImportResult] = useState(false)
+  const [importResult, setImportResult] = useState(null)
 
   useEffect(() => { loadData() }, [])
 
@@ -116,6 +119,37 @@ export default function Products() {
     showBarcodePreview(newBarcode)
   }
 
+  const handleExport = async () => {
+    setImportStatus('')
+    try {
+      const result = await window.api.exportProducts()
+      if (result.success) {
+        setImportStatus(`✅ Exported ${result.count} products to Excel`)
+      }
+    } catch (e) {
+      setImportStatus(`❌ Export failed: ${e.message}`)
+    }
+    setTimeout(() => setImportStatus(''), 5000)
+  }
+
+  const handleImport = async () => {
+    setImportStatus('')
+    try {
+      const result = await window.api.importProducts()
+      if (result.success) {
+        setImportResult(result)
+        setShowImportResult(true)
+        loadData()
+      } else if (result.error === 'Import cancelled') {
+        // Do nothing
+      } else {
+        setImportStatus(`❌ Import failed: ${result.error}`)
+      }
+    } catch (e) {
+      setImportStatus(`❌ Import failed: ${e.message}`)
+    }
+  }
+
   const filteredProducts = products.filter(p => {
     if (filter.status === 'active' && !p.active) return false
     if (filter.status === 'inactive' && p.active) return false
@@ -129,9 +163,17 @@ export default function Products() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Products</h1>
           <p className="text-sm text-gray-500">Manage your shoe inventory</p>
         </div>
-        <button onClick={openNewForm} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
-          <Plus size={18} /> Add Product
-        </button>
+        <div className="flex gap-2">
+          <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all cursor-pointer">
+            <Download size={18} /> Export
+          </button>
+          <button onClick={handleImport} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-medium transition-all cursor-pointer">
+            <Upload size={18} /> Import
+          </button>
+          <button onClick={openNewForm} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-all cursor-pointer">
+            <Plus size={18} /> Add Product
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -330,6 +372,55 @@ export default function Products() {
                 {editingProduct ? 'Update' : 'Create'} Product
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import/Export Status */}
+      {importStatus && !showImportResult && (
+        <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-lg text-sm font-medium z-50 ${
+          importStatus.includes('✅') ? 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800' :
+          importStatus.includes('❌') ? 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800' :
+          'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'
+        }`}>
+          {importStatus}
+        </div>
+      )}
+
+      {/* Import Result Modal */}
+      {showImportResult && importResult && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowImportResult(false)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-md mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-4">
+              <div className="text-3xl mb-2">📥</div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Import Complete</h3>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <span className="text-sm text-gray-700 dark:text-gray-300">Imported</span>
+                <span className="text-sm font-bold text-green-600">{importResult.imported} products</span>
+              </div>
+              {importResult.skipped > 0 && (
+                <div className="flex items-center justify-between p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Skipped</span>
+                  <span className="text-sm font-bold text-amber-600">{importResult.skipped} rows</span>
+                </div>
+              )}
+              {importResult.errors?.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs font-medium text-gray-500 mb-1">Errors:</p>
+                  <div className="max-h-32 overflow-y-auto space-y-1">
+                    {importResult.errors.map((err, i) => (
+                      <p key={i} className="text-xs text-red-500">{err}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowImportResult(false)}
+              className="w-full py-2.5 mt-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-all cursor-pointer">
+              Done
+            </button>
           </div>
         </div>
       )}
