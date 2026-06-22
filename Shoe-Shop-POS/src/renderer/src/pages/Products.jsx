@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { formatCurrency, generateBarcode } from '../lib/utils'
-import { Plus, Search, Edit2, Image, Grid3X3, List, QrCode, Printer, Upload, Download } from 'lucide-react'
+import { Plus, Search, Edit2, Image, Grid3X3, List, QrCode, Printer, Upload, Download, Trash2, AlertTriangle } from 'lucide-react'
 import JsBarcode from 'jsbarcode'
 
 export default function Products() {
@@ -22,6 +22,8 @@ export default function Products() {
   const [importStatus, setImportStatus] = useState('')
   const [showImportResult, setShowImportResult] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   useEffect(() => { loadData() }, [])
 
@@ -73,6 +75,48 @@ export default function Products() {
 
   const handleSave = async () => {
     if (!form.name || !form.selling_price) return
+
+    // Auto-detect variants: if size or color contains commas, generate variants
+    const sizes = form.size.split(',').map(s => s.trim()).filter(Boolean)
+    const colors = form.color.split(',').map(c => c.trim()).filter(Boolean)
+    const isVariant = (sizes.length > 1 || colors.length > 1) && !editingProduct
+
+    if (isVariant) {
+      const prefix = form.barcode || form.name.replace(/\s+/g, '').substring(0, 4).toUpperCase()
+      const allSizes = sizes.length > 0 ? sizes : ['']
+      const allColors = colors.length > 0 ? colors : ['']
+      const variants = []
+      for (const color of allColors) {
+        for (const size of allSizes) {
+          const colorCode = color ? color.substring(0, 4).toUpperCase() : 'NOC'
+          const sizeCode = size || 'NOS'
+          const barcode = `${prefix}-${colorCode}-${sizeCode}`
+          variants.push({ size, color, barcode })
+        }
+      }
+
+      const parentBarcode = `${prefix}-PARENT`
+      const result = await window.api.createWithVariants({
+        parent: {
+          name: form.name,
+          category_id: form.category_id ? Number(form.category_id) : null,
+          brand_id: form.brand_id ? Number(form.brand_id) : null,
+          gender: form.gender,
+          buying_price: Number(form.buying_price),
+          selling_price: Number(form.selling_price),
+          min_stock_level: Number(form.min_stock_level),
+          barcode: parentBarcode,
+          parent_sku: prefix
+        },
+        variants
+      })
+      if (result.success) {
+        setShowForm(false)
+        loadData()
+      }
+      return
+    }
+
     const data = { ...form, buying_price: Number(form.buying_price), selling_price: Number(form.selling_price), stock: Number(form.stock), min_stock_level: Number(form.min_stock_level) }
 
     let result
@@ -90,6 +134,46 @@ export default function Products() {
   const toggleActive = async (id) => {
     await window.api.toggleProductActive(id)
     loadData()
+  }
+
+  const handleDelete = async (product) => {
+    try {
+      const result = await window.api.deleteProduct({ id: product.id })
+      if (result.success) {
+        loadData()
+        setDeleteConfirm(null)
+      } else if (result.needConfirm) {
+        // Ask for confirmation
+        setDeleteConfirm(product)
+      } else {
+        alert(`Delete failed: ${result.error}`)
+      }
+    } catch (e) {
+      alert(`Delete failed: ${e.message}`)
+    }
+  }
+
+  const confirmDelete = async (product) => {
+    try {
+      await window.api.deleteProduct({ id: product.id, confirm: true })
+      loadData()
+      setDeleteConfirm(null)
+    } catch (e) {
+      alert(`Delete failed: ${e.message}`)
+    }
+  }
+
+  const handleUploadImage = async () => {
+    setUploadingImage(true)
+    try {
+      const result = await window.api.uploadProductImage()
+      if (result.success) {
+        setForm({ ...form, image_path: result.imagePath })
+      }
+    } catch (e) {
+      console.error('Image upload failed:', e)
+    }
+    setUploadingImage(false)
   }
 
   const showBarcodePreview = (barcode) => {
@@ -150,7 +234,16 @@ export default function Products() {
     }
   }
 
+  // Detect variant mode and compute preview
+  const formSizes = form.size.split(',').map(s => s.trim()).filter(Boolean)
+  const formColors = form.color.split(',').map(c => c.trim()).filter(Boolean)
+  const isVariantForm = (formSizes.length > 1 || formColors.length > 1) && !editingProduct
+  const variantPrefix = isVariantForm ? (form.barcode || form.name.replace(/\s+/g, '').substring(0, 4).toUpperCase()) : ''
+  const variantCount = isVariantForm ? (formColors.length || 1) * (formSizes.length || 1) : 0
+
+  // Hide parent placeholder products (created by variant generator)
   const filteredProducts = products.filter(p => {
+    if (p.parent_sku && !p.size && !p.color) return false
     if (filter.status === 'active' && !p.active) return false
     if (filter.status === 'inactive' && p.active) return false
     return true
@@ -250,8 +343,9 @@ export default function Products() {
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.active ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>{p.active ? 'Active' : 'Inactive'}</span>
                   </td>                    <td className="p-3">
                     <div className="flex gap-1">
-                      <button onClick={() => openEditForm(p)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-indigo-600 cursor-pointer"><Edit2 size={16} /></button>
-                      <button onClick={() => toggleActive(p.id)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-red-600 cursor-pointer">{p.active ? '🟢' : '🔴'}</button>
+                      <button onClick={() => openEditForm(p)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-indigo-600 cursor-pointer" title="Edit"><Edit2 size={16} /></button>
+                      <button onClick={() => toggleActive(p.id)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-orange-600 cursor-pointer" title={p.active ? 'Deactivate' : 'Activate'}>{p.active ? '🟢' : '🔴'}</button>
+                      <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-500 hover:text-red-600 cursor-pointer" title="Delete"><Trash2 size={16} /></button>
                     </div>
                   </td>
                 </motion.tr>
@@ -351,6 +445,26 @@ export default function Products() {
                   className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none" />
               </div>
               <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Product Image</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {form.image_path ? (
+                      <img src={form.image_path} alt="Product" className="w-full h-full object-cover" />
+                    ) : (
+                      <Image size={24} className="text-gray-400" />
+                    )}
+                  </div>
+                  <button onClick={handleUploadImage} disabled={uploadingImage}
+                    className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 cursor-pointer">
+                    {uploadingImage ? 'Uploading...' : form.image_path ? 'Change Image' : 'Upload Image'}
+                  </button>
+                  {form.image_path && (
+                    <button onClick={() => setForm({ ...form, image_path: null })}
+                      className="text-xs text-red-500 hover:text-red-700 cursor-pointer">Remove</button>
+                  )}
+                </div>
+              </div>
+              <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Barcode</label>
                 <div className="flex gap-2">
                   <input type="text" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })}
@@ -366,10 +480,43 @@ export default function Products() {
                 </div>
               </div>
             </div>
+
+            {/* Auto-detect Variant Preview — shows when commas in size or color */}
+            {isVariantForm && (
+              <div className="mt-3 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                <p className="text-xs font-medium text-indigo-700 dark:text-indigo-300 mb-2">
+                  📦 Auto-detected {formColors.length || 1} color(s) × {formSizes.length || 1} size(s) = <strong>{variantCount} variants</strong>
+                </p>
+                <p className="text-xs text-indigo-500 mb-2">Barcode prefix: <code className="bg-white dark:bg-gray-800 px-1 rounded font-mono">{variantPrefix}</code></p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="p-1 border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-800 text-left text-indigo-500">Color \ Size</th>
+                        {formSizes.map(s => <th key={s} className="p-1 border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-800 text-center text-indigo-500">{s}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(formColors.length > 0 ? formColors : ['']).map(color => (
+                        <tr key={color || 'single'}>
+                          <td className="p-1 border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-800 font-medium text-indigo-600 dark:text-indigo-400">{color || '(default)'}</td>
+                          {formSizes.map(size => (
+                            <td key={size} className="p-1 border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-800 text-center text-[10px] text-gray-400 font-mono">
+                              {variantPrefix}-{(color || 'NOC').substring(0, 4).toUpperCase()}-{size || 'NOS'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2 mt-6">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer">Cancel</button>
               <button onClick={handleSave} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-all cursor-pointer">
-                {editingProduct ? 'Update' : 'Create'} Product
+                {editingProduct ? 'Update' : isVariantForm ? `Create ${variantCount} Variants` : 'Create'} Product
               </button>
             </div>
           </div>
@@ -384,6 +531,30 @@ export default function Products() {
           'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'
         }`}>
           {importStatus}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle size={24} className="text-red-600" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">Delete Product?</h3>
+              <p className="text-sm text-gray-500 mt-1">{deleteConfirm.name}</p>
+              <p className="text-xs text-red-500 mt-2">This product has sale records. Deleting it will also remove those sale records. This cannot be undone!</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setDeleteConfirm(null)}
+                className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer">Cancel</button>
+              <button onClick={() => confirmDelete(deleteConfirm)}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-semibold transition-all cursor-pointer">
+                Delete Anyway
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

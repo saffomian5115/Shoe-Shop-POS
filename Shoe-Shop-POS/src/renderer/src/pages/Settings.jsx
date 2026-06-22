@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useUiStore } from '../store/uiStore'
-import { Save, Users, Printer, Database, Download, Upload, Sun, Moon, Building2, TestTube } from 'lucide-react'
+import { Save, Users, Printer, Database, Download, Upload, Sun, Moon, Building2, TestTube, Edit2 } from 'lucide-react'
 
 export default function Settings() {
   const { theme, toggleTheme } = useUiStore()
@@ -8,7 +8,9 @@ export default function Settings() {
   const [shopInfo, setShopInfo] = useState({ shop_name: '', address: '', phone: '', receipt_header: '', receipt_footer: '', logo_path: '' })
   const [users, setUsers] = useState([])
   const [showUserForm, setShowUserForm] = useState(false)
+  const [showEditUser, setShowEditUser] = useState(null)
   const [userForm, setUserForm] = useState({ username: '', password: '', role: 'cashier' })
+  const [editUserForm, setEditUserForm] = useState({ id: null, username: '', password: '', role: 'cashier', active: true, isAdmin: false })
   const [backupStatus, setBackupStatus] = useState('')
   const [lastBackup, setLastBackup] = useState(null)
   const [categories, setCategories] = useState([])
@@ -57,8 +59,23 @@ export default function Settings() {
   }
 
   const deleteUser = async (id) => {
-    if (confirm('Delete this user?')) {
+    if (confirm('Deactivate this user? They will no longer be able to log in.')) {
       await window.api.deleteUser(id)
+      loadSettings()
+    }
+  }
+
+  const openEditUser = (user) => {
+    setEditUserForm({ id: user.id, username: user.username, password: '', role: user.role, active: user.active, isAdmin: user.username === 'admin' })
+    setShowEditUser(user)
+  }
+
+  const saveEditUser = async () => {
+    const data = { id: editUserForm.id, username: editUserForm.username, role: editUserForm.role, active: editUserForm.active }
+    if (editUserForm.password) data.password = editUserForm.password
+    const result = await window.api.updateUser(data)
+    if (result.success) {
+      setShowEditUser(null)
       loadSettings()
     }
   }
@@ -243,9 +260,12 @@ export default function Settings() {
                       <span className={`text-xs font-medium ${u.active ? 'text-green-600' : 'text-red-600'}`}>{u.active ? 'Yes' : 'No'}</span>
                     </td>
                     <td className="p-3">
-                      {u.username !== 'admin' && (
-                        <button onClick={() => deleteUser(u.id)} className="text-xs text-red-600 hover:text-red-700 cursor-pointer">Delete</button>
-                      )}
+                      <div className="flex gap-2">
+                        <button onClick={() => openEditUser(u)} className="text-xs text-indigo-600 hover:text-indigo-700 cursor-pointer flex items-center gap-1"><Edit2 size={14} /> Edit</button>
+                        {u.username !== 'admin' && (
+                          <button onClick={() => deleteUser(u.id)} className="text-xs text-red-600 hover:text-red-700 cursor-pointer">Deactivate</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -271,6 +291,41 @@ export default function Settings() {
                 <div className="flex gap-2 mt-6">
                   <button onClick={() => setShowUserForm(false)} className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm cursor-pointer">Cancel</button>
                   <button onClick={createUser} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold cursor-pointer">Create User</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Edit User Modal */}
+          {showEditUser && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowEditUser(null)}>
+              <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-sm mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Edit User</h3>
+                <div className="space-y-3">
+                  <input type="text" placeholder="Username" value={editUserForm.username} onChange={(e) => setEditUserForm({ ...editUserForm, username: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none text-sm" />
+                  <input type="password" placeholder="New password (leave empty to keep current)" value={editUserForm.password} onChange={(e) => setEditUserForm({ ...editUserForm, password: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white outline-none text-sm" />
+                  <div>
+                    <select value={editUserForm.role} onChange={(e) => setEditUserForm({ ...editUserForm, role: e.target.value })}
+                      disabled={editUserForm.isAdmin}
+                      className={`w-full px-3 py-2 border rounded-lg text-sm outline-none ${editUserForm.isAdmin ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600'}`}>
+                      <option value="cashier">Cashier</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    {editUserForm.isAdmin && <p className="text-xs text-amber-600 mt-1">🔒 Admin role cannot be changed</p>}
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" checked={editUserForm.active} onChange={(e) => setEditUserForm({ ...editUserForm, active: e.target.checked })}
+                      disabled={editUserForm.isAdmin}
+                      className={`rounded border-gray-300 dark:border-gray-600 ${editUserForm.isAdmin ? 'cursor-not-allowed opacity-50' : 'text-indigo-600 focus:ring-indigo-500'}`} />
+                    Active (can log in)
+                    {editUserForm.isAdmin && <span className="text-xs text-amber-600">(always active)</span>}
+                  </label>
+                </div>
+                <div className="flex gap-2 mt-6">
+                  <button onClick={() => setShowEditUser(null)} className="flex-1 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm cursor-pointer">Cancel</button>
+                  <button onClick={saveEditUser} className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold cursor-pointer">Save Changes</button>
                 </div>
               </div>
             </div>

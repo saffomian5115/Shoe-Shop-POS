@@ -21,6 +21,7 @@ export default function POS() {
   const [barcodeBuffer, setBarcodeBuffer] = useState('')
   const [printing, setPrinting] = useState(false)
   const [printStatus, setPrintStatus] = useState('')
+  const [variantPicker, setVariantPicker] = useState(null)
   const searchRef = useRef(null)
   const barcodeTimer = useRef(null)
   const { subtotal, discountAmount, total } = cart.getTotals()
@@ -214,26 +215,70 @@ export default function POS() {
             />
             {searchQuery && searchResults.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-50 max-h-80 overflow-y-auto">
-                {searchResults.map(product => (
-                  <motion.button
-                    key={product.id}
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    onClick={() => { cart.addItem(product); setSearchQuery(''); setSearchResults([]) }}
-                    className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all text-left"
-                    whileHover={{ scale: 1.01 }}
-                  >
-                    <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg">
-                      👟
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{product.name}</p>
-                      <p className="text-xs text-gray-500">{product.category_name} {product.size && `- Size ${product.size}`} {product.color && `- ${product.color}`}</p>
-                    </div>
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(product.selling_price)}</p>
-                    <p className="text-xs text-gray-400">Stock: {product.stock}</p>
-                  </motion.button>
-                ))}
+                {(() => {
+                  // Group results: products with parent_sku are variants, group them
+                  const groups = new Map() // parent_sku -> { name, variants: [] }
+                  const singles = []
+                  for (const p of searchResults) {
+                    if (p.parent_sku && p.size) {
+                      // This is a variant → add to group
+                      if (!groups.has(p.parent_sku)) {
+                        groups.set(p.parent_sku, { name: p.name, parentSku: p.parent_sku, variants: [] })
+                      }
+                      groups.get(p.parent_sku).variants.push(p)
+                    } else if (!p.parent_sku) {
+                      // Normal product (no parent_sku) → show directly
+                      singles.push(p)
+                    }
+                    // else: parent placeholder (parent_sku set but no size) → SKIP
+                  }
+                  const items = []
+                  // Add single products (non-variant)
+                  for (const p of singles) {
+                    items.push(
+                      <motion.button
+                        key={p.id}
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={() => { cart.addItem(p); setSearchQuery(''); setSearchResults([]) }}
+                        className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all text-left"
+                        whileHover={{ scale: 1.01 }}
+                      >
+                        <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center text-lg">👟</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.name}</p>
+                          <p className="text-xs text-gray-500">{p.category_name} {p.size && `- Size ${p.size}`} {p.color && `- ${p.color}`}</p>
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{formatCurrency(p.selling_price)}</p>
+                        <p className="text-xs text-gray-400">Stock: {p.stock}</p>
+                      </motion.button>
+                    )
+                  }
+                  // Add variant groups
+                  for (const [sku, group] of groups) {
+                    const colors = [...new Set(group.variants.map(v => v.color).filter(Boolean))]
+                    const sizes = [...new Set(group.variants.map(v => v.size).filter(Boolean))]
+                    const totalStock = group.variants.reduce((sum, v) => sum + v.stock, 0)
+                    items.push(
+                      <motion.button
+                        key={'group-' + sku}
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={() => setVariantPicker(group)}
+                        className="w-full flex items-center gap-3 p-3 hover:bg-indigo-50 dark:hover:bg-gray-800 transition-all text-left border-l-4 border-indigo-500"
+                        whileHover={{ scale: 1.01 }}
+                      >
+                        <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center text-lg">📦</div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{group.name}</p>
+                          <p className="text-xs text-indigo-500 font-medium">{colors.length} colors × {sizes.length} sizes — tap to select</p>
+                        </div>
+                        <p className="text-xs text-gray-400">Stock: {totalStock}</p>
+                      </motion.button>
+                    )
+                  }
+                  return items
+                })()}
               </div>
             )}
           </div>
@@ -457,6 +502,79 @@ export default function POS() {
             )}
           </motion.div>
         </motion.div>
+      )}
+
+      {/* Variant Picker Modal */}
+      {variantPicker && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setVariantPicker(null)}>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-lg mx-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">{variantPicker.name}</h3>
+                <p className="text-xs text-gray-500">Select a color and size to add to cart</p>
+              </div>
+              <button onClick={() => setVariantPicker(null)} className="text-gray-400 hover:text-gray-600 cursor-pointer"><X size={20} /></button>
+            </div>
+            {(() => {
+              const colors = [...new Set(variantPicker.variants.map(v => v.color).filter(Boolean))]
+              const sizes = [...new Set(variantPicker.variants.map(v => v.size).filter(Boolean))]
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="p-2 border border-gray-200 dark:border-gray-700 text-xs text-gray-500 font-medium bg-gray-50 dark:bg-gray-800 text-left">Color \ Size</th>
+                        {sizes.map(s => (
+                          <th key={s} className="p-2 border border-gray-200 dark:border-gray-700 text-xs text-gray-500 font-medium bg-gray-50 dark:bg-gray-800 text-center">{s}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {colors.map(color => (
+                        <tr key={color}>
+                          <td className="p-2 border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800">{color}</td>
+                          {sizes.map(size => {
+                            const variant = variantPicker.variants.find(v => v.color === color && v.size === size)
+                            return (
+                              <td key={size} className="p-1 border border-gray-200 dark:border-gray-700 text-center">
+                                {variant ? (
+                                  <button
+                                    onClick={() => {
+                                      cart.addItem(variant)
+                                      setVariantPicker(null)
+                                      setSearchQuery('')
+                                      setSearchResults([])
+                                    }}
+                                    disabled={variant.stock === 0}
+                                    className={`w-full px-2 py-2 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                                      variant.stock === 0
+                                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                                        : 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
+                                    }`}
+                                  >
+                                    <div className="font-bold">{formatCurrency(variant.selling_price)}</div>
+                                    <div className={variant.stock <= variant.min_stock_level ? 'text-red-500' : 'text-gray-400'}>
+                                      {variant.stock === 0 ? 'Out of Stock' : `Stock: ${variant.stock}`}
+                                    </div>
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-gray-300">—</span>
+                                )}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })()}
+            <button onClick={() => setVariantPicker(null)} className="w-full py-2.5 mt-4 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer">
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Held Bills Modal */}

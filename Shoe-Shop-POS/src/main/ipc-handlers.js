@@ -35,6 +35,13 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('users:update', (_, { id, username, password, role, active }) => {
     const db = getDb()
+    // Prevent changing the admin user's role or deactivating them
+    const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(id)
+    if (targetUser && targetUser.username === 'admin') {
+      // Force admin role, cannot be deactivated
+      role = 'admin'
+      active = true
+    }
     if (password) {
       const hash = hashPassword(password)
       db.prepare('UPDATE users SET username = ?, password_hash = ?, role = ?, active = ? WHERE id = ?').run(username, hash, role, active ? 1 : 0, id)
@@ -44,8 +51,27 @@ export function registerIpcHandlers() {
     return { success: true }
   })
 
+  ipcMain.handle('users:reset-admin', () => {
+    const db = getDb()
+    const hash = hashPassword('admin')
+    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get('admin')
+    if (existing) {
+      db.prepare('UPDATE users SET password_hash = ?, role = ?, active = 1 WHERE id = ?').run(hash, 'admin', existing.id)
+    } else {
+      db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'admin')
+    }
+    return { success: true, message: 'Admin user reset to username: admin, password: admin' }
+  })
+
   ipcMain.handle('users:delete', (_, id) => {
-    getDb().prepare('DELETE FROM users WHERE id = ?').run(id)
+    const db = getDb()
+    // Prevent deactivating the admin user
+    const targetUser = db.prepare('SELECT username FROM users WHERE id = ?').get(id)
+    if (targetUser && targetUser.username === 'admin') {
+      return { success: false, error: 'Cannot deactivate the admin user' }
+    }
+    // Soft-delete: set active=0 instead of hard-deleting (avoids FK constraint failures with sales/stock_adjustments)
+    db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(id)
     return { success: true }
   })
 
@@ -82,6 +108,48 @@ export function registerIpcHandlers() {
     } catch (e) {
       return { success: false, error: e.message }
     }
+  })
+
+  // ==================== PRODUCT VARIANTS ====================
+  ipcMain.handle('products:get-variant-group', (_, parentSku) => {
+    const db = getDb()
+    const parent = db.prepare('SELECT * FROM products WHERE parent_sku = ? AND size IS NULL AND color IS NULL').get(parentSku)
+    const variants = db.prepare(`SELECT p.*, c.name as category_name, b.name as brand_name 
+      FROM products p LEFT JOIN categories c ON p.category_id = c.id 
+      LEFT JOIN brands b ON p.brand_id = b.id 
+      WHERE p.parent_sku = ? AND p.size IS NOT NULL ORDER BY p.color, p.size`).all(parentSku)
+    return { parent, variants }
+  })
+
+  ipcMain.handle('products:create-with-variants', (_, { parent, variants }) => {
+    const db = getDb()
+    const transaction = db.transaction(() => {
+      // Insert parent product (no size/color, stock = 0)
+      const parentResult = db.prepare(`INSERT INTO products
+        (name, category_id, brand_id, gender, buying_price, selling_price, stock, min_stock_level, barcode, parent_sku, active)
+        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`).run(
+        parent.name, parent.category_id || null, parent.brand_id || null,
+        parent.gender || null, parent.buying_price || 0, parent.selling_price || 0,
+        parent.min_stock_level || 5, parent.barcode, parent.parent_sku
+      )
+
+      // Insert each variant
+      const insertVariant = db.prepare(`INSERT INTO products
+        (name, category_id, brand_id, gender, size, color, buying_price, selling_price, stock, min_stock_level, barcode, parent_sku, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1)`)
+
+      for (const v of variants) {
+        insertVariant.run(
+          parent.name, parent.category_id || null, parent.brand_id || null,
+          parent.gender || null, v.size, v.color,
+          parent.buying_price || 0, parent.selling_price || 0,
+          parent.min_stock_level || 5, v.barcode, parent.parent_sku
+        )
+      }
+
+      return { success: true, parentId: parentResult.lastInsertRowid, variantCount: variants.length }
+    })
+    return transaction()
   })
 
   // ==================== PRODUCTS ====================
@@ -130,6 +198,14 @@ export function registerIpcHandlers() {
   ipcMain.handle('products:create', (_, product) => {
     const db = getDb()
     try {
+      // Prevent duplicate: same name + brand_id + size + color
+      const existing = db.prepare('SELECT id FROM products WHERE name = ? AND brand_id = ? AND size = ? AND color = ?').get(
+        product.name, product.brand_id || null, product.size || null, product.color || null
+      )
+      if (existing) {
+        return { success: false, error: 'Product with same name, brand, size, and color already exists' }
+      }
+
       const result = db.prepare(`INSERT INTO products (name, category_id, brand_id, gender, buying_price, selling_price, 
         stock, min_stock_level, barcode, image_path, size, color, active) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`).run(
@@ -167,6 +243,61 @@ export function registerIpcHandlers() {
     if (!product) return { success: false, error: 'Product not found' }
     getDb().prepare('UPDATE products SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(product.active ? 0 : 1, id)
     return { success: true }
+  })
+
+  ipcMain.handle('products:delete', async (_, { id, confirm }) => {
+    const db = getDb()
+    try {
+      // Check if product has sales
+      const saleCount = db.prepare('SELECT COUNT(*) as count FROM sale_items WHERE product_id = ?').get(id)
+      if (saleCount.count > 0 && !confirm) {
+        return { success: false, needConfirm: true, message: `This product has ${saleCount.count} sale records. Delete anyway?` }
+      }
+      if (saleCount.count > 0 && confirm) {
+        // Restore stock before deleting sale items
+        const itemsToDelete = db.prepare('SELECT product_id, quantity FROM sale_items WHERE product_id = ?').all(id)
+        for (const item of itemsToDelete) {
+          db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity, item.product_id)
+        }
+        db.prepare('DELETE FROM sale_items WHERE product_id = ?').run(id)
+      }
+      // Delete stock adjustments
+      db.prepare('DELETE FROM stock_adjustments WHERE product_id = ?').run(id)
+      // Delete purchase items
+      db.prepare('DELETE FROM purchase_items WHERE product_id = ?').run(id)
+      // Finally delete the product
+      db.prepare('DELETE FROM products WHERE id = ?').run(id)
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('products:upload-image', async () => {
+    try {
+      const result = await dialog.showOpenDialog({
+        title: 'Select Product Image',
+        filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }],
+        properties: ['openFile']
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: 'Cancelled' }
+      }
+
+      const srcPath = result.filePaths[0]
+      const ext = path.extname(srcPath).toLowerCase()
+      const mimeMap = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' }
+      const mime = mimeMap[ext] || 'image/png'
+
+      // Read file and convert to base64 data URI
+      const buffer = fs.readFileSync(srcPath)
+      const base64 = buffer.toString('base64')
+      const dataUri = `data:${mime};base64,${base64}`
+
+      return { success: true, imagePath: dataUri }
+    } catch (e) {
+      return { success: false, error: e.message }
+    }
   })
 
   ipcMain.handle('products:get-by-barcode', (_, barcode) => {

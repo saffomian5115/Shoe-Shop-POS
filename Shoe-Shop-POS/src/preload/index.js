@@ -10,6 +10,7 @@ const api = {
   createUser: (data) => ipcRenderer.invoke('users:create', data),
   updateUser: (data) => ipcRenderer.invoke('users:update', data),
   deleteUser: (id) => ipcRenderer.invoke('users:delete', id),
+  resetAdmin: () => ipcRenderer.invoke('users:reset-admin'),
 
   // Categories
   getCategories: () => ipcRenderer.invoke('categories:list'),
@@ -26,7 +27,11 @@ const api = {
   createProduct: (data) => ipcRenderer.invoke('products:create', data),
   updateProduct: (data) => ipcRenderer.invoke('products:update', data),
   toggleProductActive: (id) => ipcRenderer.invoke('products:toggle-active', id),
+  deleteProduct: (data) => ipcRenderer.invoke('products:delete', data),
   getProductByBarcode: (barcode) => ipcRenderer.invoke('products:get-by-barcode', barcode),
+  uploadProductImage: () => ipcRenderer.invoke('products:upload-image'),
+  createWithVariants: (data) => ipcRenderer.invoke('products:create-with-variants', data),
+  getVariantGroup: (parentSku) => ipcRenderer.invoke('products:get-variant-group', parentSku),
 
   // Sales
   createSale: (data) => ipcRenderer.invoke('sales:create', data),

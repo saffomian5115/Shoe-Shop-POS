@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import { formatCurrency, formatDate } from '../lib/utils'
-import { Search, AlertTriangle, History, Plus, Package, Truck } from 'lucide-react'
+import { Search, AlertTriangle, History, Plus, Package, Truck, ChevronDown, ChevronRight } from 'lucide-react'
 
 export default function Inventory() {
   const [products, setProducts] = useState([])
@@ -14,6 +14,7 @@ export default function Inventory() {
   const [historyData, setHistoryData] = useState([])
   const [adjustForm, setAdjustForm] = useState({ new_qty: 0, reason_type: 'Physical Count', reason: '' })
   const [purchaseForm, setPurchaseForm] = useState({ supplier_id: '', invoice_no: '', items: [{ product_id: '', quantity: 1, buying_price: 0 }] })
+  const [expandedGroups, setExpandedGroups] = useState(new Set())
 
   useEffect(() => { loadData() }, [])
 
@@ -26,11 +27,53 @@ export default function Inventory() {
     setSuppliers(supps)
   }
 
-  const filteredProducts = products.filter(p => {
-    if (showLowStock && p.stock > p.min_stock_level) return false
-    if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase()) && !p.barcode?.includes(searchQuery)) return false
-    return true
-  })
+  // Build grouped inventory
+  const buildGroupedInventory = () => {
+    const groups = new Map() // parent_sku -> { name, variants: [] }
+    const singles = []
+
+    for (const p of products) {
+      if (p.parent_sku && p.size) {
+        if (!groups.has(p.parent_sku)) {
+          groups.set(p.parent_sku, { name: p.name, parentSku: p.parent_sku, variants: [] })
+        }
+        groups.get(p.parent_sku).variants.push(p)
+      } else if (!p.parent_sku) {
+        singles.push(p)
+      }
+    }
+
+    // Filter
+    const filteredSingles = singles.filter(p => {
+      if (showLowStock && p.stock > p.min_stock_level) return false
+      if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase()) && !p.barcode?.includes(searchQuery)) return false
+      return true
+    })
+
+    const filteredGroups = []
+    for (const [sku, group] of groups) {
+      const matchedVariants = group.variants.filter(v => {
+        if (showLowStock && v.stock > v.min_stock_level) return false
+        if (searchQuery && !v.name.toLowerCase().includes(searchQuery.toLowerCase()) && !v.barcode?.includes(searchQuery)) return false
+        return true
+      })
+      if (matchedVariants.length > 0) {
+        filteredGroups.push({ ...group, variants: matchedVariants })
+      }
+    }
+
+    return { singles: filteredSingles, groups: filteredGroups }
+  }
+
+  const toggleGroup = (sku) => {
+    const next = new Set(expandedGroups)
+    if (next.has(sku)) next.delete(sku)
+    else next.add(sku)
+    setExpandedGroups(next)
+  }
+
+  const { singles, groups } = buildGroupedInventory()
+  const totalItems = singles.length + groups.length
 
   const handleAdjust = async () => {
     if (!adjustProduct) return
@@ -108,7 +151,8 @@ export default function Inventory() {
             </tr>
           </thead>
           <tbody>
-            {filteredProducts.map(p => {
+            {/* Single products (non-variant) */}
+            {singles.map(p => {
               const isLow = p.stock <= p.min_stock_level
               const isOut = p.stock === 0
               return (
@@ -144,9 +188,89 @@ export default function Inventory() {
                 </tr>
               )
             })}
+
+            {/* Variant groups */}
+            {groups.map(group => {
+              const totalStock = group.variants.reduce((s, v) => s + v.stock, 0)
+              const isExpanded = expandedGroups.has(group.parentSku)
+              const minStock = Math.min(...group.variants.map(v => v.min_stock_level))
+              const groupLow = totalStock <= minStock
+              const colors = [...new Set(group.variants.map(v => v.color).filter(Boolean))]
+              const sizes = [...new Set(group.variants.map(v => v.size).filter(Boolean))]
+              return (
+                <Fragment key={'group-' + group.parentSku}>
+                  <tr
+                    onClick={() => toggleGroup(group.parentSku)}
+                    className={`border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-all ${groupLow ? 'bg-orange-50 dark:bg-orange-900/10' : 'bg-indigo-50/50 dark:bg-indigo-900/10'}`}
+                  >
+                    <td className="p-3">
+                      <div className="flex items-center gap-2">
+                        {isExpanded ? <ChevronDown size={16} className="text-indigo-500" /> : <ChevronRight size={16} className="text-indigo-500" />}
+                        <span className="text-sm font-semibold text-indigo-700 dark:text-indigo-400">{group.name}</span>
+                        <span className="px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded text-xs">
+                          {colors.length} colors × {sizes.length} sizes
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3 text-sm text-gray-500">—</td>
+                    <td className="p-3">
+                      <span className={`text-sm font-bold ${groupLow ? 'text-orange-600' : 'text-gray-900 dark:text-white'}`}>{totalStock}</span>
+                      <span className="text-xs text-gray-400 ml-1">total</span>
+                    </td>
+                    <td className="p-3 text-sm text-gray-400">—</td>
+                    <td className="p-3">
+                      {groupLow ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">Low Stock</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">In Stock</span>
+                      )}
+                    </td>
+                    <td className="p-3 text-xs text-gray-400 italic">Click to expand</td>
+                  </tr>
+                  {/* Expanded variant rows */}
+                  {isExpanded && group.variants.map(v => {
+                    const isLow = v.stock <= v.min_stock_level
+                    const isOut = v.stock === 0
+                    return (
+                      <tr key={v.id} className={`border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all ${isLow ? 'bg-red-50/50 dark:bg-red-900/5' : ''}`}>
+                        <td className="p-3 pl-10">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-400">↳</span>
+                            <span className="text-sm text-gray-900 dark:text-white">{v.color}, Size {v.size}</span>
+                            <span className="text-xs text-gray-400 font-mono">{v.barcode}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{v.category_name || '-'}</td>
+                        <td className="p-3">
+                          <span className={`text-sm font-bold ${isOut ? 'text-red-600' : isLow ? 'text-orange-600' : 'text-gray-900 dark:text-white'}`}>{v.stock}</span>
+                        </td>
+                        <td className="p-3 text-sm text-gray-600 dark:text-gray-400">{v.min_stock_level}</td>
+                        <td className="p-3">
+                          {isOut ? (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">Out of Stock</span>
+                          ) : isLow ? (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">Low Stock</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">In Stock</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="flex gap-1">
+                            <button onClick={(e) => { e.stopPropagation(); setAdjustProduct(v); setAdjustForm({ new_qty: v.stock, reason_type: 'Physical Count', reason: '' }); setShowAdjust(true) }}
+                              className="px-2 py-1 text-xs bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded hover:bg-indigo-100 dark:hover:bg-indigo-900/50 cursor-pointer">Adjust</button>
+                            <button onClick={(e) => { e.stopPropagation(); viewHistory(v) }}
+                              className="px-2 py-1 text-xs bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"><History size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
-        {filteredProducts.length === 0 && <p className="text-center text-sm text-gray-400 py-8">No products found</p>}
+        {totalItems === 0 && <p className="text-center text-sm text-gray-400 py-8">No products found</p>}
       </div>
 
       {/* Stock Adjustment Modal */}

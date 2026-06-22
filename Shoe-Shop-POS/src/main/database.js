@@ -171,9 +171,18 @@ export async function initializeDatabase() {
     defaultCats.forEach(cat => insert.run(cat))
   }
 
-  // Seed comprehensive test data if database is empty
-  const { seedDatabase } = await import('./seed')
-  seedDatabase()
+  // Safety net: ensure admin user always exists with correct role and is active
+  const adminUser = database.prepare('SELECT id, role, active FROM users WHERE username = ?').get('admin')
+  if (!adminUser) {
+    const hash = crypto.createHash('sha256').update('admin').digest('hex')
+    database.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'admin')
+  } else {
+    // Fix admin role if accidentally changed
+    if (adminUser.role !== 'admin' || adminUser.active !== 1) {
+      database.prepare('UPDATE users SET role = ?, active = 1 WHERE id = ?').run('admin', adminUser.id)
+      console.log('⚠️  Admin user was corrupted — fixed role and reactivated')
+    }
+  }
 
   console.log('Database initialized successfully')
 }
