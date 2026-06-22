@@ -1,6 +1,9 @@
 import { ipcMain } from 'electron'
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+import { app } from 'electron'
 import { getDb } from './database'
-const crypto = require('crypto')
 
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password).digest('hex')
@@ -176,7 +179,6 @@ export function registerIpcHandlers() {
   ipcMain.handle('sales:create', (_, { sale, items }) => {
     const db = getDb()
     const transaction = db.transaction(() => {
-      // Generate bill number
       const date = new Date()
       const prefix = `BILL-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}-`
       const lastBill = db.prepare("SELECT bill_no FROM sales WHERE bill_no LIKE ? ORDER BY id DESC LIMIT 1").get(`${prefix}%`)
@@ -201,7 +203,6 @@ export function registerIpcHandlers() {
 
       for (const item of items) {
         insertItem.run(saleId, item.product_id, item.product_name, item.quantity, item.unit_price, item.discount || 0, item.subtotal)
-        // Update stock
         db.prepare('UPDATE products SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(item.quantity, item.product_id)
       }
 
@@ -253,7 +254,6 @@ export function registerIpcHandlers() {
 
       db.prepare('UPDATE sales SET status = ? WHERE id = ?').run('void', id)
 
-      // Restore stock
       const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(id)
       for (const item of items) {
         db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity, item.product_id)
@@ -264,7 +264,6 @@ export function registerIpcHandlers() {
     return transaction()
   })
 
-  // ==================== HELD BILLS ====================
   ipcMain.handle('sales:held', () => {
     return getDb().prepare(`SELECT s.*, u.username FROM sales s LEFT JOIN users u ON s.user_id = u.id WHERE s.status = 'held' ORDER BY s.id DESC`).all()
   })
@@ -295,7 +294,6 @@ export function registerIpcHandlers() {
   })
 
   ipcMain.handle('sales:delete-held', (_, id) => {
-    // Restore stock when deleting held bill
     const items = getDb().prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(id)
     for (const item of items) {
       getDb().prepare('UPDATE products SET stock = stock + ? WHERE id = ?').run(item.quantity, item.product_id)
@@ -390,7 +388,6 @@ export function registerIpcHandlers() {
 
       for (const item of items) {
         insertItem.run(purchaseId, item.product_id, item.quantity, item.buying_price)
-        // Update stock and buying price
         const product = db.prepare('SELECT stock, buying_price FROM products WHERE id = ?').get(item.product_id)
         const newStock = product.stock + item.quantity
         const newAvgPrice = ((product.buying_price * product.stock) + (item.buying_price * item.quantity)) / newStock
@@ -456,7 +453,7 @@ export function registerIpcHandlers() {
     let dateFormat
     if (group_by === 'daily') dateFormat = '%Y-%m-%d'
     else if (group_by === 'monthly') dateFormat = '%Y-%m'
-    else dateFormat = '%Y-%W' // weekly
+    else dateFormat = '%Y-%W'
 
     return getDb().prepare(`SELECT strftime('${dateFormat}', created_at) as period, 
       COUNT(*) as bill_count, COALESCE(SUM(net_amount), 0) as revenue,
@@ -478,23 +475,26 @@ export function registerIpcHandlers() {
 
   // ==================== BACKUP ====================
   ipcMain.handle('backup:local', () => {
-    const fs = require('fs')
-    const path = require('path')
-    const { app } = require('electron')
-    
     const dbPath = 'C:\\ProgramData\\ShoeShopPOS\\pos.db'
     const backupDir = path.join(app.getPath('documents'), 'ShoeShopPOS_Backups')
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true })
-    
+
     const date = new Date().toISOString().replace(/[:.]/g, '-')
     const backupPath = path.join(backupDir, `pos_backup_${date}.db`)
     fs.copyFileSync(dbPath, backupPath)
-    
+
     return { success: true, path: backupPath }
   })
 
   ipcMain.handle('backup:get-last-time', () => {
     const setting = getDb().prepare("SELECT value FROM settings WHERE key = 'last_backup'").get()
     return setting ? setting.value : null
+  })
+
+  // ==================== PRINT (placeholder for thermal printer) ====================
+  ipcMain.handle('print:receipt', (_, data) => {
+    // Placeholder - thermal printer integration will be added later
+    console.log('Print receipt called:', data)
+    return { success: true, message: 'Print functionality coming soon' }
   })
 }

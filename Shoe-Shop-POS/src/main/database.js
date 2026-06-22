@@ -1,14 +1,15 @@
 import { app } from 'electron'
 import { join } from 'path'
+import fs from 'fs'
 import Database from 'better-sqlite3'
+import crypto from 'crypto'
 
 let db = null
 
-const DB_PATH = join('C:\\ProgramData\\ShoeShopPOS', 'pos.db')
+const DB_PATH = 'C:\\ProgramData\\ShoeShopPOS\\pos.db'
 
 export function getDb() {
   if (!db) {
-    const fs = require('fs')
     const dir = 'C:\\ProgramData\\ShoeShopPOS'
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })
@@ -152,7 +153,6 @@ export function initializeDatabase() {
   // Seed default admin user if no users exist
   const userCount = database.prepare('SELECT COUNT(*) as count FROM users').get()
   if (userCount.count === 0) {
-    const crypto = require('crypto')
     const hash = crypto.createHash('sha256').update('admin').digest('hex')
     database.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'admin')
   }

@@ -37,9 +37,9 @@ export default function Products() {
   }
 
   const handleFilter = async (key, value) => {
-    const newFilter = { ...filter, [key]: value }
-    setFilter(newFilter)
-    const prods = await window.api.getProducts({ search: searchQuery, ...newFilter })
+    const updatedFilter = { ...filter, [key]: value }
+    setFilter(updatedFilter)
+    const prods = await window.api.getProducts({ search: searchQuery, ...updatedFilter })
     setProducts(prods)
   }
 
